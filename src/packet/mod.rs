@@ -13,7 +13,7 @@ pub use self::record::*;
 pub fn query_packet_min_size(name: &str) -> usize {
     // Header Size + NAMES Size + QueryType Size + QueryClass Size
     //    12       name.len() + 1       2                2
-    12 + name.len() + 1 + 2 + 2
+    12 + name.len() + 1 + 1 + 2 + 2
 }
 
 // 4. MESSAGES
