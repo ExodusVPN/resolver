@@ -127,7 +127,7 @@ impl std::fmt::Display for OpCode {
 
 // 4 Bits
 /// Response code - this 4 bit field is set as part of responses.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub struct ResponseCode(u8);
 
 impl ResponseCode {
@@ -190,6 +190,32 @@ impl ResponseCode {
         match self.0 {
             10 ..= 15 => true,
             _ => false,
+        }
+    }
+}
+
+impl std::fmt::Debug for ResponseCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            &ResponseCode::OK => write!(f, "OK"),
+            &ResponseCode::FORMAT_ERROR => write!(f, "FORMAT_ERROR"),
+            &ResponseCode::SERVER_FAILURE => write!(f, "SERVER_FAILURE"),
+            &ResponseCode::NON_EXISTENT_DOMAIN => write!(f, "NON_EXISTENT_DOMAIN"),
+            &ResponseCode::NOT_IMPLEMENTED => write!(f, "NOT_IMPLEMENTED"),
+            &ResponseCode::QUERY_REFUSED  => write!(f, "QUERY_REFUSED"),
+            &ResponseCode::YXDOMAIN  => write!(f, "YXDOMAIN"),
+            &ResponseCode::YXRRSET  => write!(f, "YXRRSET"),
+            &ResponseCode::NXRRSET  => write!(f, "NXRRSET"),
+            &ResponseCode::NOT_AUTH  => write!(f, "NOT_AUTH"),
+            &ResponseCode::NOT_ZONE  => write!(f, "NOT_ZONE"),
+
+            _ => {
+                if self.is_unassigned() {
+                    write!(f, "Unassigned({})", self.0)
+                } else {
+                    write!(f, "Unknow({})", self.0)
+                }
+            },
         }
     }
 }

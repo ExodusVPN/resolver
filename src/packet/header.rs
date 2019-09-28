@@ -119,7 +119,7 @@ impl<T: AsRef<[u8]>> HeaderPacket<T> {
     #[inline]
     pub fn opcode(&self) -> OpCode {
         let data = self.buffer.as_ref();
-        OpCode::new(data[2] << 1 >> 4)
+        OpCode::new((data[2] << 1)  >> 4)
     }
 
     // 1 bits
@@ -133,7 +133,7 @@ impl<T: AsRef<[u8]>> HeaderPacket<T> {
     #[inline]
     pub fn aa(&self) -> bool {
         let data = self.buffer.as_ref();
-        data[2] << 5 >> 2 == 0
+        (data[2] & 0b_0000_0100) >> 2 == 1
     }
 
     // 1 bits
@@ -143,7 +143,7 @@ impl<T: AsRef<[u8]>> HeaderPacket<T> {
     #[inline]
     pub fn tc(&self) -> bool {
         let data = self.buffer.as_ref();
-        data[2] << 6 >> 1 == 0
+        (data[2] & 0b_0000_0010) >> 1 == 1
     }
 
     // 1 bits
@@ -154,7 +154,7 @@ impl<T: AsRef<[u8]>> HeaderPacket<T> {
     #[inline]
     pub fn rd(&self) -> bool {
         let data = self.buffer.as_ref();
-        data[2] << 7 == 0
+        (data[2] & 0b_0000_0001) == 1
     }
 
     // Offset: 3
@@ -165,7 +165,7 @@ impl<T: AsRef<[u8]>> HeaderPacket<T> {
     #[inline]
     pub fn ra(&self) -> bool {
         let data = self.buffer.as_ref();
-        data[3] >> 7 == 0
+        data[3] >> 7 == 1
     }
 
     // 3 bits
@@ -181,7 +181,7 @@ impl<T: AsRef<[u8]>> HeaderPacket<T> {
     #[inline]
     pub fn rcode(&self) -> ResponseCode {
         let data = self.buffer.as_ref();
-        ResponseCode::new(data[3] << 4)
+        ResponseCode::new(data[3] << 4 >> 4)
     }
 
     /// an unsigned 16 bit integer specifying the number of entries in the question section.
@@ -385,7 +385,7 @@ impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Debug for HeaderPacket<&'a T> {
 
 impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Display for HeaderPacket<&'a T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "HeaderPacket {{ id: {}, qr: {:?}, opcode: {}, aa: {}, tc: {}, rd: {}, ra: {}, z: {}, rcode: {}, qdcount: {}, ancount: {}, nscount: {}, arcount: {} }}",
+        write!(f, "HeaderPacket {{ id: {}, qr: {:?}, opcode: {}, aa: {}, tc: {}, rd: {}, ra: {}, z: {}, rcode: {:?}, qdcount: {}, ancount: {}, nscount: {}, arcount: {} }}",
                 self.id(),
                 self.qr(),
                 self.opcode(),
@@ -401,4 +401,44 @@ impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Display for HeaderPacket<&'a T> {
                 self.arcount(),
         )
     }
+}
+
+#[test]
+fn test_header_packet() {
+    let mut buffer = [0u8; 1024];
+
+    let mut pkt = HeaderPacket::new_unchecked(&mut buffer[..]);
+    pkt.set_id(1);
+    pkt.set_qr(MessageType::Query);
+    pkt.set_opcode(OpCode::QUERY);
+    pkt.set_aa(true);
+    pkt.set_tc(true);
+    pkt.set_rd(false);
+    pkt.set_ra(true);
+    pkt.set_z(0);
+    pkt.set_rcode(ResponseCode::OK);
+    pkt.set_qdcount(1);
+    pkt.set_ancount(0);
+    pkt.set_nscount(0);
+    pkt.set_arcount(0);
+
+    let buffer = pkt.into_inner();
+    let pkt = HeaderPacket::new_checked(&buffer[..]);
+    assert!(pkt.is_ok());
+
+    let pkt = pkt.unwrap();
+    assert_eq!(pkt.id(), 1);
+    assert_eq!(pkt.qr(), MessageType::Query);
+    assert_eq!(pkt.opcode(), OpCode::QUERY);
+
+    assert_eq!(pkt.aa(), true);
+    assert_eq!(pkt.tc(), true);
+    assert_eq!(pkt.rd(), false);
+    assert_eq!(pkt.ra(), true);
+    assert_eq!(pkt.z(), 0);
+    assert_eq!(pkt.rcode(), ResponseCode::OK);
+    assert_eq!(pkt.qdcount(), 1);
+    assert_eq!(pkt.ancount(), 0);
+    assert_eq!(pkt.nscount(), 0);
+    assert_eq!(pkt.arcount(), 0);
 }
