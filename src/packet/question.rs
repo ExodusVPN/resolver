@@ -540,7 +540,7 @@ impl<T: AsRef<[u8]>> QuestionPacket<T> {
             }
         }
 
-        if names_length + labels_count - 1 > MAXIMUM_NAMES_SIZE {
+        if names_length + labels_count > MAXIMUM_NAMES_SIZE + 1 {
             return Err(Error::NamesSizeLimitExceeded);
         }
 
@@ -663,6 +663,65 @@ impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Display for QuestionPacket<&'a T> {
     }
 }
 
+// Labels
+// 
+// Normal DNS encoding separates the domain name into "labels" (the parts separated by periods) 
+// and encodes the name by listing the number of characters in each label, 
+// followed by the actual characters, with the whole thing terminated with zero. 
+// So "www.google.com" would be encoded as as "3www6google3com0".
+// 
+// LabelsPointer (2  Bytes)
+// 
+// When a pointer is used instead of the literal domain name, the pointer will be only two bytes. 
+// The first two bits of the first byte will be "11" which indicates that it is a pointer, 
+// not a literal domain name. The remaining bits are the actual value of the pointer, 
+// as an offset from the beginning of the DNS portion of the packet, 
+// which is normally the transaction ID.
+// 
+// Example: [ 11, LabelsIndexPos ]
+// 
+// 4.1.4. Message compression
+// https://tools.ietf.org/html/rfc1035#section-4.1.4
+// 
+// The pointer takes the form of a two octet sequence:
+// 
+//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+//     | 1  1|                OFFSET                   |
+//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+// 
+// The first two bits are ones.  This allows a pointer to be distinguished
+// from a label, since the label must begin with two zero bits because
+// labels are restricted to 63 octets or less.  (The 10 and 01 combinations
+// are reserved for future use.)  The OFFSET field specifies an offset from
+// the start of the message (i.e., the first octet of the ID field in the
+// domain header).  A zero offset specifies the first byte of the ID field,
+// etc.
+// 
+// The compression scheme allows a domain name in a message to be
+// represented as either:
+// 
+//    - a sequence of labels ending in a zero octet
+// 
+//    - a pointer
+// 
+//    - a sequence of labels ending with a pointer
+// 
+// Pointers can only be used for occurances of a domain name where the
+// format is not class specific.  If this were not the case, a name server
+// or resolver would be required to know the format of all RRs it handled.
+// As yet, there are no such cases, but they may occur in future RDATA
+// formats.
+// 
+// If a domain name is contained in a part of the message subject to a
+// length field (such as the RDATA section of an RR), and compression is
+// used, the length of the compressed name is used in the length
+// calculation, rather than the length of the expanded name.
+// 
+// Programs are free to avoid using pointers in messages they generate,
+// although this will reduce datagram capacity, and may cause truncation.
+// However all programs are required to understand arriving messages that
+// contain pointers.
+// 
 
 #[derive(Debug, Eq, Hash, Clone, Copy)]
 pub struct Labels<'a> {

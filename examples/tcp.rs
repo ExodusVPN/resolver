@@ -24,7 +24,7 @@ fn main() -> Result<(), io::Error> {
 
 fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
 
-    let mut buffer = [0u8; 1024];
+    let mut buffer = [0u8; 1024*4];
     let mut pkt = packet::HeaderPacket::new_unchecked(&mut buffer[..]);
     pkt.set_id(1);
     pkt.set_qr(packet::MessageType::Query);
@@ -61,15 +61,27 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
     println!("amt: {:?}", amt);
     println!("recv: {:?}", &buffer[..amt]);
 
-    let hdr = packet::HeaderPacket::new_checked(&buffer[..amt])?;
+    let buffer = &buffer[..amt];
+    let hdr = packet::HeaderPacket::new_checked(&buffer[..])?;
     println!("{}", hdr);
-    // let ques = packet::QuestionPacket::new_checked(&buffer[12..])?;
-    // println!("{}", ques);
+    let ancount = hdr.ancount() as usize;
 
-    let ans = packet::AnswerPacket::new_checked(&buffer[12..])?;
-    // println!("rdlen: {:?}", ans.rdlen());
-    println!("{}", ans);
-    println!("{:?}", ans.payload());
+    let mut payload = hdr.payload();
+    let ques = packet::QuestionPacket::new_checked(payload)?;
+    println!("{}", ques);
+    payload = ques.payload();
 
+    for _ in 0..ancount {
+        let ans = packet::AnswerPacket::new_checked(payload)?;
+        println!("AnswerPacket:");
+        println!("\tatype: {}", ans.atype());
+        println!("\taclass: {}", ans.aclass());
+        println!("\tttl: {:?}", ans.ttl());
+        println!("\trdlen: {:?}", ans.rdlen());
+        println!("\trdata: {:?}\n", ans.rdata());
+
+        payload = &ans.payload()[..];
+    }
+    
     Ok(())
 }

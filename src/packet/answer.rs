@@ -101,9 +101,9 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
 
     fn last_label_offset(&self) -> Result<usize, Error> {
         let data = self.buffer.as_ref();
-
-        let mut names_length = 0;
-        let mut labels_count = 0;
+        
+        let mut names_length = 0usize;
+        let mut labels_count = 0usize;
         let mut idx = 0usize;
         loop {
             if idx >= data.len() {
@@ -113,6 +113,14 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
             let len = data[idx] as usize;
             if len == 0 {
                 break;
+            }
+            
+            if data[0] & 0b_1100_0000 == 0b_1100_0000 {
+                let offset = u16::from_be_bytes([ data[idx + 0], data[idx + 1] ]) & 0b_0011_1111_1111_1111;
+
+                idx += 2;
+                labels_count += 1;
+                continue;
             }
 
             if len > MAXIMUM_LABEL_SIZE {
@@ -136,8 +144,12 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
             }
         }
 
-        if names_length + labels_count - 1 > MAXIMUM_NAMES_SIZE {
+        if names_length + labels_count > MAXIMUM_NAMES_SIZE + 1 {
             return Err(Error::NamesSizeLimitExceeded);
+        }
+
+        if data[idx] == 0 {
+            idx -= 1;
         }
 
         Ok(idx)
@@ -157,9 +169,18 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
     #[inline]
     pub fn aclass(&self) -> QuestionClass {
         let data = self.buffer.as_ref();
-
+        // TODO:
+        // 
+        // let prefer_unicast = value & 0x8000 == 0x8000;
+        // let qclass_code = value & 0x7FFF;
+        // 
+        // let is_unique = value & 0x8000 == 0x8000;
+        // let class_code = value & 0x7FFF;
+        // 
         let offset = self.last_label_offset().unwrap() + 1 + 2;
-        QuestionClass(u16::from_be_bytes([ data[offset + 0], data[offset + 1] ]))
+        let num = u16::from_be_bytes([ data[offset + 0], data[offset + 1] ]);
+
+        QuestionClass(num & 0x7FFF)
     }
 
     /// a 32 bit unsigned integer that specifies the time interval (in seconds) 
@@ -171,7 +192,12 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
         let data = self.buffer.as_ref();
 
         let offset = self.last_label_offset().unwrap() + 1 + 2 + 2;
-        u32::from_be_bytes([ data[offset+0], data[offset+1], data[offset+2], data[offset+3] ])
+        let num = u32::from_be_bytes([
+            data[offset+0], data[offset+1],
+            data[offset+2], data[offset+3]
+        ]);
+
+        if num > i32::MAX as u32 { 0 } else { num }
     }
 
     /// an unsigned 16 bit integer that specifies the length in octets of the RDATA field.
@@ -207,9 +233,9 @@ impl<'a, T: AsRef<[u8]> + ?Sized> AnswerPacket<&'a T> {
 
     #[inline]
     pub fn payload(&self) -> &'a [u8] {
+        let offset = self.last_label_offset().unwrap() + 1 + 2 + 2 + 4 + 2 + self.rdlen() as usize;
         let data = self.buffer.as_ref();
 
-        let offset = self.last_label_offset().unwrap() + 1 + 2 + 2 + 4 + 2 + self.rdlen() as usize;
         &data[offset..]
     }
 }
@@ -316,7 +342,8 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> AnswerPacket<T> {
 impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Debug for AnswerPacket<&'a T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "AnswerPacket {{ labels: {:?}, atype: {:?}, aclass: {:?}, ttl: {:?}, rdlen: {:?}, rdata: {:?} }}",
-                self.labels().collect::<Vec<&str>>(),
+                // self.labels().collect::<Vec<&str>>(),
+                self.labels(),
                 self.atype(),
                 self.aclass(),
                 self.ttl(),
@@ -329,7 +356,8 @@ impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Debug for AnswerPacket<&'a T> {
 impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Display for AnswerPacket<&'a T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "AnswerPacket {{ labels: {:?}, atype: {}, aclass: {}, ttl: {}, rdlen: {}, rdata: {:?} }}",
-                self.labels().collect::<Vec<&str>>(),
+                // self.labels().collect::<Vec<&str>>(),
+                self.labels(),
                 self.atype(),
                 self.aclass(),
                 self.ttl(),
