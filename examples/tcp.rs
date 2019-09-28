@@ -9,10 +9,13 @@ use std::net::TcpStream;
 
 
 fn main() -> Result<(), io::Error> {
-    let name = env::args().skip(1).next().unwrap();
+    // Example:
+    //      $ cargo run --example tcp www.gov.cn
+    let name = env::args().skip(1).next().expect("请在命令行参数当中加上需要查询的域名！");
 
     // let name_server = "f.root-servers.net:53";
     let name_server = "8.8.8.8:53";
+    println!("NameServer: {:?} Name: {:?}\n", name_server, name);
     let mut conn = TcpStream::connect(name_server)?;
 
     resolve(&mut conn, &name)
