@@ -114,7 +114,7 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
             if len == 0 {
                 break;
             }
-            
+
             if data[0] & 0b_1100_0000 == 0b_1100_0000 {
                 let offset = u16::from_be_bytes([ data[idx + 0], data[idx + 1] ]) & 0b_0011_1111_1111_1111;
 
@@ -197,7 +197,7 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
             data[offset+2], data[offset+3]
         ]);
 
-        if num > i32::MAX as u32 { 0 } else { num }
+        if num > std::i32::MAX as u32 { 0 } else { num }
     }
 
     /// an unsigned 16 bit integer that specifies the length in octets of the RDATA field.
