@@ -199,10 +199,10 @@ impl<'a, T: AsRef<[u8]> + ?Sized> AnswerPacket<&'a T> {
     /// Additional RR-specific data
     #[inline]
     pub fn rdata(&self) -> &'a [u8] {
+        let offset = self.last_label_offset().unwrap() + 1 + 2 + 2 + 4 + 2;
         let data = self.buffer.as_ref();
 
-        let offset = self.last_label_offset().unwrap() + 1 + 2 + 2 + 4 + 2;
-        &data[offset..self.rdlen() as usize]
+        &data[offset..offset + self.rdlen() as usize]
     }
 
     #[inline]
@@ -297,10 +297,10 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> AnswerPacket<T> {
         let offset = self.last_label_offset().unwrap() + 1 + 2 + 2 + 4 + 2;
         let rdlen = self.rdlen() as usize;
         let data = self.buffer.as_mut();
-        
+
         // NOTE: 确保名字先存储了！
         assert_eq!(data[offset-11], 0);
-        
+
         &mut data[offset..rdlen]
     }
 
