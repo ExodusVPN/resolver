@@ -73,11 +73,11 @@ impl OpCode {
     /// a server status request (STATUS)
     pub const STATUS: Self = Self(2);
 
-    /// Notify [RFC1996]
+    /// Notify RFC1996
     pub const NOTIFY: Self = Self(4);
-    /// Update [RFC2136]
+    /// Update RFC2136
     pub const UPDATE: Self = Self(5);
-    /// DNS Stateful Operations (DSO)   [RFC8490]
+    /// DNS Stateful Operations (DSO)   RFC8490
     pub const DNS_STATEFUL_OPERATIONS: Self = Self(6);
 
     pub const MAX: Self    = Self(15);
@@ -131,26 +131,26 @@ impl std::fmt::Display for OpCode {
 pub struct ResponseCode(u8);
 
 impl ResponseCode {
-    /// No Error    [RFC1035]
+    /// No Error   RFC1035
     /// No error condition
     pub const OK: Self              = Self(0);
-    /// Format Error    [RFC1035]
+    /// Format Error   RFC1035
     /// Format error - The name server was unable to interpret the query.
     pub const FORMAT_ERROR: Self    = Self(1);
-    /// Server Failure  [RFC1035]
+    /// Server Failure  RFC1035
     /// Server failure - The name server was unable to 
     /// process this query due to a problem with the name server.
     pub const SERVER_FAILURE: Self  = Self(2);
-    /// Non-Existent Domain     [RFC1035]
+    /// Non-Existent Domain     RFC1035
     /// Name Error - Meaningful only for responses from 
     /// an authoritative name server, this code signifies that the
     /// domain name referenced in the query does not exist.
     pub const NON_EXISTENT_DOMAIN: Self = Self(3);
-    /// Not Implemented     [RFC1035]
+    /// Not Implemented     RFC1035
     /// Not Implemented - The name server does
     /// not support the requested kind of query.
     pub const NOT_IMPLEMENTED: Self     = Self(4);
-    /// Query Refused   [RFC1035]
+    /// Query Refused   RFC1035
     /// Refused - The name server refuses to perform the specified operation for policy reasons.
     /// For example, a name server may not wish to provide the information 
     /// to the particular requester, or a name server may not wish to perform
@@ -158,16 +158,16 @@ impl ResponseCode {
     pub const QUERY_REFUSED: Self       = Self(5);
 
 
-    /// YXDomain    Name Exists when it should not  [RFC2136] [RFC6672]
+    /// YXDomain    Name Exists when it should not  RFC2136 RFC6672
     pub const YXDOMAIN: Self = Self(6);
-    /// YXRRSet     RR Set Exists when it should not    [RFC2136]
+    /// YXRRSet     RR Set Exists when it should not    RFC2136
     pub const YXRRSET: Self  = Self(7);
-    /// NXRRSet     RR Set that should exist does not   [RFC2136]
+    /// NXRRSet     RR Set that should exist does not   RFC2136
     pub const NXRRSET: Self  = Self(8);
-    /// NotAuth     Server Not Authoritative for zone   [RFC2136]
-    /// NotAuth     Not Authorized  [RFC2845]
+    /// NotAuth     Server Not Authoritative for zone   RFC2136
+    /// NotAuth     Not Authorized  RFC2845
     pub const NOT_AUTH: Self = Self(9);
-    /// NotZone     Name not contained in zone  [RFC2136]
+    /// NotZone     Name not contained in zone  RFC2136
     pub const NOT_ZONE: Self = Self(10);
 
     // NOTE: 大于 10 的代码参见 ErrorCode 部分。
@@ -280,63 +280,63 @@ impl std::fmt::Display for ResponseCode {
 pub struct ErrorCode(u16);
 
 impl ErrorCode {
-    /// No Error    [RFC1035]
+    /// No Error    RFC1035
     /// No error condition
     pub const OK: Self              = Self(0);
-    /// Format Error    [RFC1035]
+    /// Format Error    RFC1035
     /// Format error - The name server was unable to interpret the query.
     pub const FORMAT_ERROR: Self    = Self(1);
-    /// Server Failure  [RFC1035]
+    /// Server Failure  RFC1035
     /// Server failure - The name server was unable to 
     /// process this query due to a problem with the name server.
     pub const SERVER_FAILURE: Self  = Self(2);
-    /// Non-Existent Domain     [RFC1035]
+    /// Non-Existent Domain     RFC1035
     /// Name Error - Meaningful only for responses from 
     /// an authoritative name server, this code signifies that the
     /// domain name referenced in the query does not exist.
     pub const NON_EXISTENT_DOMAIN: Self = Self(3);
-    /// Not Implemented     [RFC1035]
+    /// Not Implemented     RFC1035
     /// Not Implemented - The name server does
     /// not support the requested kind of query.
     pub const NOT_IMPLEMENTED: Self     = Self(4);
-    /// Query Refused   [RFC1035]
+    /// Query Refused   RFC1035
     /// Refused - The name server refuses to perform the specified operation for policy reasons.
     /// For example, a name server may not wish to provide the information 
     /// to the particular requester, or a name server may not wish to perform
     /// a particular operation (e.g., zone transfer) for particular data.
     pub const QUERY_REFUSED: Self       = Self(5);
 
-    /// YXDomain    Name Exists when it should not  [RFC2136] [RFC6672]
+    /// YXDomain    Name Exists when it should not  RFC2136 RFC6672
     pub const YXDOMAIN: Self = Self(6);
-    /// YXRRSet     RR Set Exists when it should not    [RFC2136]
+    /// YXRRSet     RR Set Exists when it should not    RFC2136
     pub const YXRRSET: Self  = Self(7);
-    /// NXRRSet     RR Set that should exist does not   [RFC2136]
+    /// NXRRSet     RR Set that should exist does not   RFC2136
     pub const NXRRSET: Self  = Self(8);
-    /// NotAuth     Server Not Authoritative for zone   [RFC2136]
-    /// NotAuth     Not Authorized  [RFC2845]
+    /// NotAuth     Server Not Authoritative for zone   RFC2136
+    /// NotAuth     Not Authorized  RFC2845
     pub const NOT_AUTH: Self = Self(9);
-    /// NotZone     Name not contained in zone  [RFC2136]
+    /// NotZone     Name not contained in zone  RFC2136
     pub const NOT_ZONE: Self = Self(10);
 
-    /// DSOTYPENI   DSO-TYPE Not Implemented    [RFC8490]
+    /// DSOTYPENI   DSO-TYPE Not Implemented    RFC8490
     pub const DSOTYPENI: Self= Self(11);
     
-    /// 16 BADVERS     Bad OPT Version     [RFC6891]
-    /// 16 BADSIG      TSIG Signature Failure  [RFC2845]
+    /// 16 BADVERS     Bad OPT Version     RFC6891
+    /// 16 BADSIG      TSIG Signature Failure  RFC2845
     pub const BADVERS: Self = Self(16);
-    /// BADKEY      Key not recognized  [RFC2845]
+    /// BADKEY      Key not recognized  RFC2845
     pub const BADKEY: Self  = Self(17);
-    /// BADTIME     Signature out of time window    [RFC2845]
+    /// BADTIME     Signature out of time window    RFC2845
     pub const BADTIME: Self = Self(18);
-    /// BADMODE     Bad TKEY Mode   [RFC2930]
+    /// BADMODE     Bad TKEY Mode   RFC2930
     pub const BADMODE: Self = Self(19);
-    /// BADNAME     Duplicate key name  [RFC2930]
+    /// BADNAME     Duplicate key name  RFC2930
     pub const BADNAME: Self = Self(20);
-    /// BADALG      Algorithm not supported     [RFC2930]
+    /// BADALG      Algorithm not supported     RFC2930
     pub const BADALG: Self  = Self(21);
-    /// BADTRUNC    Bad Truncation  [RFC4635]
+    /// BADTRUNC    Bad Truncation  RFC4635
     pub const BADTRUNC: Self  = Self(22);
-    /// BADCOOKIE   Bad/missing Server Cookie   [RFC7873]
+    /// BADCOOKIE   Bad/missing Server Cookie   RFC7873
     pub const BADCOOKIE: Self = Self(23);
 
 
@@ -358,8 +358,8 @@ impl ErrorCode {
 
     #[inline]
     pub fn is_reserved(&self) -> bool {
-        // 3841-4095   Reserved for Private Use        [RFC6895]
-        // 65535       Reserved, can be allocated by Standards Action      [RFC6895]
+        // 3841-4095   Reserved for Private Use        RFC6895
+        // 65535       Reserved, can be allocated by Standards Action     RFC6895
         match self.0 {
             3841 ..= 4095 | 65535 => true,
             _ => false,

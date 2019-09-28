@@ -36,7 +36,7 @@ use crate::packet::ResponseCode;
 //     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 // 
 /// 4.1.1. Header section format
-#[derive(Debug, PartialEq, Clone)]
+#[derive(PartialEq, Clone)]
 pub struct HeaderPacket<T: AsRef<[u8]>> {
     buffer: T
 }
@@ -363,9 +363,29 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> HeaderPacket<T> {
 }
 
 
+impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Debug for HeaderPacket<&'a T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "HeaderPacket {{ id: {:?}, qr: {:?}, opcode: {:?}, aa: {:?}, tc: {:?}, rd: {:?}, ra: {:?}, z: {:?}, rcode: {:?}, qdcount: {:?}, ancount: {:?}, nscount: {:?}, arcount: {:?} }}",
+                self.id(),
+                self.qr(),
+                self.opcode(),
+                self.aa(),
+                self.tc(),
+                self.rd(),
+                self.ra(),
+                self.z(),
+                self.rcode(),
+                self.qdcount(),
+                self.ancount(),
+                self.nscount(),
+                self.arcount(),
+        )
+    }
+}
+
 impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Display for HeaderPacket<&'a T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "HeaderPacket {{ id: {:?}, qr: {:?}, opcode: {:?}, aa: {:?}, tc: {}, rd: {}, ra: {}, z: {}, rcode: {:?}, qdcount: {}, ancount: {}, nscount: {}, arcount: {} }}",
+        write!(f, "HeaderPacket {{ id: {}, qr: {:?}, opcode: {}, aa: {}, tc: {}, rd: {}, ra: {}, z: {}, rcode: {}, qdcount: {}, ancount: {}, nscount: {}, arcount: {} }}",
                 self.id(),
                 self.qr(),
                 self.opcode(),
