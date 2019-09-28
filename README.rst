@@ -8,7 +8,7 @@ TODO
 -------
 Packet:
 
-*   更好的支持 名称 压缩机制 ( `4.1.4. Message compression<https://tools.ietf.org/html/rfc1035#section-4.1.4>`_ )
+*   更好的支持 名称 压缩机制 ( `4.1.4. Message compression <https://tools.ietf.org/html/rfc1035#section-4.1.4>`_ )
 *   支持对非 ASCII 域名以 punycode 编码后再查询。 (如查询: `互联网中心.中国` )
 
 
