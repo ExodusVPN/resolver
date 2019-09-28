@@ -293,10 +293,15 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> AnswerPacket<T> {
     }
 
     #[inline]
-    pub fn set_rdata(&mut self, _value: u16) {
-        // let offset = self.last_label_offset().unwrap() + 1 + 2 + 2 + 4 + 2;
-        // &data[offset..self.rdlen() as usize]
-        unimplemented!();
+    pub fn rdata_mut(&mut self) -> &mut [u8] {
+        let offset = self.last_label_offset().unwrap() + 1 + 2 + 2 + 4 + 2;
+        let rdlen = self.rdlen() as usize;
+        let data = self.buffer.as_mut();
+        
+        // NOTE: 确保名字先存储了！
+        assert_eq!(data[offset-11], 0);
+        
+        &mut data[offset..rdlen]
     }
 
     #[inline]
