@@ -10,7 +10,10 @@ use crate::MAXIMUM_NAMES_SIZE;
 pub struct QuestionType(pub u16);
 
 impl QuestionType {
-    /// a host address
+    // Note
+    // 0   0x0000  RRTYPE zero is used as a special indicator for the SIG RR [RFC2931], [RFC4034] and in other circumstances and must never be allocated for ordinary use.
+
+    /// a host address (IPv4 Address)
     pub const A: Self     = Self(1);
     /// an authoritative name server
     pub const NS: Self    = Self(2);
@@ -43,6 +46,131 @@ impl QuestionType {
     /// text strings
     pub const TXT: Self   = Self(16);
 
+    // https://www.iana.org/assignments/dns-parameters/dns-parameters.xhtml#dns-parameters-4
+
+    /// for Responsible Person  [RFC1183]
+    pub const RP: Self       = Self(17);
+    /// for AFS Data Base location  [RFC1183][RFC5864]
+    pub const AFSDB: Self    = Self(18);
+    /// for X.25 PSDN address   [RFC1183]
+    pub const X25: Self      = Self(19);
+    /// for ISDN address    [RFC1183]
+    pub const ISDN: Self     = Self(20);
+    /// for Route Through   [RFC1183]
+    pub const RT: Self       = Self(21);
+    /// for NSAP address, NSAP style A record   [RFC1706]
+    pub const NSAP: Self     = Self(22);
+    /// for domain name pointer, NSAP style     [RFC1348][RFC1637][RFC1706]
+    pub const NSAP_PTR: Self = Self(23);
+    /// for security signature  [RFC4034][RFC3755][RFC2535][RFC2536][RFC2537][RFC2931][RFC3110][RFC3008]
+    pub const SIG: Self  = Self(24);
+    /// for security key    [RFC4034][RFC3755][RFC2535][RFC2536][RFC2537][RFC2539][RFC3008][RFC3110]
+    pub const KEY: Self  = Self(25);
+    /// X.400 mail mapping information  [RFC2163]
+    pub const PX: Self   = Self(26);
+    /// Geographical Position   [RFC1712]
+    pub const GPOS: Self = Self(27);
+    /// IPv6 Address, [RFC3596]
+    pub const AAAA: Self = Self(28);
+    /// Location Information    [RFC1876]
+    pub const LOC: Self  = Self(29);
+    /// Next Domain (OBSOLETE)  [RFC3755][RFC2535]
+    pub const NXT: Self  = Self(30);
+    /// Endpoint Identifier     [Michael_Patton][http://ana-3.lcs.mit.edu/~jnc/nimrod/dns.txt]      1995-06
+    pub const EID: Self  = Self(31);
+    /// Nimrod Locator  [1][Michael_Patton][http://ana-3.lcs.mit.edu/~jnc/nimrod/dns.txt]       1995-06
+    pub const NIMLOC: Self = Self(32);
+    /// Server Selection    [1][RFC2782]
+    pub const SRV: Self    = Self(33);
+    /// ATM Address     [ ATM Forum Technical Committee, "ATM Name System, V2.0", Doc ID: AF-DANS-0152.000, July 2000. Available from and held in escrow by IANA.]
+    pub const ATMA: Self   = Self(34);
+    /// Naming Authority Pointer    [RFC2915] [RFC2168] [RFC3403]
+    pub const NAPTR: Self  = Self(35);
+    /// Key Exchanger   [RFC2230]
+    pub const KX: Self     = Self(36);
+    /// DNAME   [RFC6672]
+    pub const DNAME: Self  = Self(39);
+    /// SINK    [Donald_E_Eastlake][http://tools.ietf.org/html/draft-eastlake-kitchen-sink]         1997-11
+    pub const SINK: Self  = Self(40);
+    /// OPT     [RFC6891][RFC3225]
+    pub const OPT: Self    = Self(41);
+    /// APL     [RFC3123]
+    pub const APL: Self    = Self(42);
+    /// Delegation Signer   [RFC4034][RFC3658]
+    pub const DS: Self     = Self(43);
+    /// SSH Key Fingerprint     [RFC4255]
+    pub const SSHFP: Self  = Self(44);
+    /// IPSECKEY    [RFC4025]
+    pub const IPSECKEY: Self = Self(45);
+    /// RRSIG   [RFC4034][RFC3755]
+    pub const RRSIG: Self    = Self(46);
+    /// NSEC    [RFC4034][RFC3755]
+    pub const NSEC: Self     = Self(47);
+    /// DNSKEY  [RFC4034][RFC3755]
+    pub const DNSKEY: Self   = Self(48);
+    /// DHCID   [RFC4701]
+    pub const DHCID: Self    = Self(49);
+    /// NSEC3   [RFC5155]
+    pub const NSEC3: Self    = Self(50);
+    /// NSEC3PARAM  [RFC5155]
+    pub const NSEC3PARAM: Self = Self(51);
+    /// TLSA    [RFC6698]
+    pub const TLSA: Self       = Self(52);
+    /// S/MIME cert association     [RFC8162]
+    pub const SMIMEA: Self     = Self(53);
+
+    /// Host Identity Protocol  [RFC8005]
+    pub const HIP: Self        = Self(55);
+    /// NINFO   [Jim_Reid]  NINFO/ninfo-completed-template  2008-01-21
+    pub const NINFO: Self      = Self(56);
+
+    /// RKEY    [Jim_Reid]  RKEY/rkey-completed-template    2008-01-21
+    pub const RKEY: Self       = Self(57);
+    /// Trust Anchor LINK   [Wouter_Wijngaards]     TALINK/talink-completed-template    2010-02-17
+    pub const TALINK: Self     = Self(58);
+
+    /// Child DS    [RFC7344]   CDS/cds-completed-template  2011-06-06
+    pub const CDS: Self        = Self(59);
+    /// DNSKEY(s) the Child wants reflected in DS   [RFC7344]       2014-06-16
+    pub const CDNSKEY: Self    = Self(60);
+    /// OpenPGP Key     [RFC7929]   OPENPGPKEY/openpgpkey-completed-template    2014-08-12
+    pub const OPENPGPKEY: Self = Self(61);
+    /// Child-To-Parent Synchronization     [RFC7477]       2015-01-27
+    pub const CSYNC: Self      = Self(62);
+    /// message digest for DNS zone     [draft-wessels-dns-zone-digest]     ZONEMD/zonemd-completed-template    2018-12-12
+    pub const ZONEMD: Self     = Self(63);
+
+    /// [RFC7208]
+    pub const SPF: Self     = Self(99);
+    /// [IANA-Reserved]
+    pub const UINFO: Self   = Self(100);
+    /// [IANA-Reserved]
+    pub const UID: Self     = Self(101);
+    /// [IANA-Reserved]
+    pub const GID: Self     = Self(102);
+    /// [IANA-Reserved]
+    pub const UNSPEC: Self  = Self(103);
+    /// [RFC6742]   ILNP/nid-completed-template
+    pub const NID: Self     = Self(104);
+    /// [RFC6742]   ILNP/l32-completed-template
+    pub const L32: Self     = Self(105);
+    /// [RFC6742]   ILNP/l64-completed-template
+    pub const L64: Self     = Self(106);
+    /// [RFC6742]   ILNP/lp-completed-template
+    pub const LP: Self      = Self(107);
+    /// an EUI-48 address   [RFC7043]   EUI48/eui48-completed-template  2013-03-27
+    pub const EUI48: Self   = Self(108);
+    /// an EUI-64 address   [RFC7043]   EUI64/eui64-completed-template  2013-03-27
+    pub const EUI64: Self   = Self(109);
+
+
+    /// Transaction Key     [RFC2930]
+    pub const TKEY: Self  = Self(249);
+    /// Transaction Signature   [RFC2845]
+    pub const TSIG: Self  = Self(250);
+    /// incremental transfer    [RFC1995]
+    pub const IXFR: Self  = Self(251);
+
     // QTYPE values
     /// A request for a transfer of an entire zone
     pub const AXFR: Self  = Self(252);
@@ -50,12 +178,54 @@ impl QuestionType {
     pub const MAILB: Self = Self(253);
     /// A request for mail agent RRs (Obsolete - see MX)
     pub const MAILA: Self = Self(254);
-    /// A request for all records
+    /// A request for all records (*)
     pub const ALL: Self   = Self(255);
+    /// URI     [RFC7553]   URI/uri-completed-template  2011-02-22
+    pub const URI: Self   = Self(256);
+    /// Certification Authority Restriction     [RFC-ietf-lamps-rfc6844bis-07]  CAA/caa-completed-template  2011-04-07
+    pub const CAA: Self      = Self(257);
+    /// Application Visibility and Control  [Wolfgang_Riedel]   AVC/avc-completed-template  2016-02-26
+    pub const AVC: Self      = Self(258);
+    /// Digital Object Architecture     [draft-durand-doa-over-dns]     DOA/doa-completed-template  2017-08-30
+    pub const DOA: Self      = Self(259);
+    /// Automatic Multicast Tunneling Relay     [draft-ietf-mboned-driad-amt-discovery]     AMTRELAY/amtrelay-completed-template    2019-02-06
+    pub const AMTRELAY: Self = Self(260);
+
+    /// DNSSEC Trust Authorities    [Sam_Weiler][http://cameo.library.cmu.edu/][ Deploying DNSSEC Without a Signed Root. Technical Report 1999-19, Information Networking Institute, Carnegie Mellon University, April 2004.]       2005-12-13
+    pub const TA: Self    = Self(32768);
+    /// DNSSEC Lookaside Validation     [RFC4431]
+    pub const DLV: Self   = Self(32769);
+
 
     #[inline]
-    pub fn is_unspecified(&self) -> bool {
-        self.0 == 0 || (self.0 > Self::TXT.0 && self.0 < Self::AXFR.0)
+    pub fn is_unassigned(&self) -> bool {
+        // Unassigned   54
+        // Unassigned   64-98
+        // Unassigned   110-248
+        // Unassigned   261-32767
+        // Unassigned  32770-65279
+        match self.0 {
+            54 | 64 ..= 98 | 110 ..= 248 | 261 ..= 32767 | 32770 ..= 65279 => true,
+            _ => false,
+        }
+    }
+
+    #[inline]
+    pub fn is_private_use(&self) -> bool {
+        // Private use     65280-65534
+        match self.0 {
+            65280 ..= 65534 => true,
+            _ => false,
+        }
+    }
+
+    #[inline]
+    pub fn is_reserved(&self) -> bool {
+        // Reserved    65535
+        match self.0 {
+            65535 => true,
+            _ => false,
+        }
     }
 }
 
@@ -79,17 +249,107 @@ impl std::fmt::Display for QuestionType {
             &QuestionType::MX => write!(f, "MX"),
             &QuestionType::TXT => write!(f, "TXT"),
 
+            &QuestionType::RP => write!(f, "RP"),
+            &QuestionType::AFSDB => write!(f, "AFSDB"),
+            &QuestionType::X25 => write!(f, "X25"),
+            &QuestionType::ISDN => write!(f, "ISDN"),
+            &QuestionType::RT => write!(f, "RT"),
+            &QuestionType::NSAP => write!(f, "NSAP"),
+            &QuestionType::NSAP_PTR => write!(f, "NSAP-PTR"),
+            &QuestionType::SIG => write!(f, "SIG"),
+            &QuestionType::KEY => write!(f, "KEY"),
+            &QuestionType::PX => write!(f, "PX"),
+            &QuestionType::GPOS => write!(f, "GPOS"),
+            &QuestionType::AAAA => write!(f, "AAAA"),
+            &QuestionType::LOC => write!(f, "LOC"),
+            &QuestionType::NXT => write!(f, "NXT"),
+            &QuestionType::EID => write!(f, "EID"),
+            &QuestionType::NIMLOC => write!(f, "NIMLOC"),
+            &QuestionType::SRV => write!(f, "SRV"),
+            &QuestionType::ATMA => write!(f, "ATMA"),
+            &QuestionType::NAPTR => write!(f, "NAPTR"),
+            &QuestionType::KX => write!(f, "KX"),
+            &QuestionType::DNAME => write!(f, "DNAME"),
+            &QuestionType::SINK => write!(f, "SINK"),
+            &QuestionType::OPT => write!(f, "OPT"),
+            &QuestionType::APL => write!(f, "APL"),
+            &QuestionType::DS => write!(f, "DS"),
+            &QuestionType::SSHFP => write!(f, "SSHFP"),
+            &QuestionType::IPSECKEY => write!(f, "IPSECKEY"),
+            &QuestionType::RRSIG => write!(f, "RRSIG"),
+            &QuestionType::NSEC => write!(f, "NSEC"),
+            &QuestionType::DNSKEY => write!(f, "DNSKEY"),
+            &QuestionType::DHCID => write!(f, "DHCID"),
+            &QuestionType::NSEC3 => write!(f, "NSEC3"),
+            &QuestionType::NSEC3PARAM => write!(f, "NSEC3PARAM"),
+            &QuestionType::TLSA => write!(f, "TLSA"),
+            &QuestionType::SMIMEA => write!(f, "SMIMEA"),
+            &QuestionType::HIP => write!(f, "HIP"),
+            &QuestionType::NINFO => write!(f, "NINFO"),
+            &QuestionType::RKEY => write!(f, "RKEY"),
+            &QuestionType::TALINK => write!(f, "TALINK"),
+            &QuestionType::CDS => write!(f, "CDS"),
+            &QuestionType::CDNSKEY => write!(f, "CDNSKEY"),
+            &QuestionType::OPENPGPKEY => write!(f, "OPENPGPKEY"),
+            &QuestionType::CSYNC => write!(f, "CSYNC"),
+            &QuestionType::ZONEMD => write!(f, "ZONEMD"),
+
+            &QuestionType::SPF => write!(f, "SPF"),
+            &QuestionType::UINFO => write!(f, "UINFO"),
+            &QuestionType::UID => write!(f, "UID"),
+            &QuestionType::GID => write!(f, "GID"),
+            &QuestionType::UNSPEC => write!(f, "UNSPEC"),
+            &QuestionType::NID => write!(f, "NID"),
+            &QuestionType::L32 => write!(f, "L32"),
+            &QuestionType::L64 => write!(f, "L64"),
+            &QuestionType::LP => write!(f, "LP"),
+            &QuestionType::EUI48 => write!(f, "EUI48"),
+            &QuestionType::EUI64 => write!(f, "EUI64"),
+
+            &QuestionType::TKEY => write!(f, "TKEY"),
+            &QuestionType::TSIG => write!(f, "TSIG"),
+            &QuestionType::IXFR => write!(f, "IXFR"),
+            
             &QuestionType::AXFR => write!(f, "AXFR"),
             &QuestionType::MAILB => write!(f, "MAILB"),
             &QuestionType::MAILA => write!(f, "MAILA"),
             &QuestionType::ALL => write!(f, "ALL"),
+            &QuestionType::URI => write!(f, "URI"),
+            &QuestionType::CAA => write!(f, "CAA"),
+            &QuestionType::AVC => write!(f, "AVC"),
+            &QuestionType::DOA => write!(f, "DOA"),
+            &QuestionType::AMTRELAY => write!(f, "AMTRELAY"),
+            &QuestionType::TA => write!(f, "TA"),
+            &QuestionType::DLV => write!(f, "DLV"),
 
-            _ => write!(f, "UnspecifiedQuestionType({})", self.0),
+            _ => {
+                if self.is_unassigned() {
+                    write!(f, "Unassigned({})", self.0)
+                } else if self.is_private_use() {
+                    write!(f, "PrivateUse({})", self.0)
+                } else if self.is_reserved() {
+                    write!(f, "Reserved({})", self.0)
+                } else {
+                    write!(f, "Unknow({})", self.0)
+                }
+            },
         }
     }
 }
 
 
+// 0        0x0000  Reserved    [RFC6895]
+// 1        0x0001  Internet (IN)   [RFC1035]
+// 2        0x0002  Unassigned  
+// 3        0x0003  Chaos (CH)  [D. Moon, "Chaosnet", A.I. Memo 628, Massachusetts Institute of Technology Artificial Intelligence Laboratory, June 1981.]
+// 4        0x0004  Hesiod (HS)     [Dyer, S., and F. Hsu, "Hesiod", Project Athena Technical Plan - Name Service, April 1987.]
+// 5-253    0x0005-0x00FD   Unassigned  
+// 254      0x00FE  QCLASS NONE     [RFC2136]
+// 255      0x00FF  QCLASS * (ANY)  [RFC1035]
+// 256-65279        0x0100-0xFEFF   Unassigned  
+// 65280-65534      0xFF00-0xFFFE   Reserved for Private Use    [RFC6895]
+// 65535            0xFFFF  Reserved    [RFC6895]
+// 
 // 16 Bits
 /// two octets containing one of the RR CLASS codes.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
@@ -98,7 +358,7 @@ pub struct QuestionClass(pub u16);
 impl QuestionClass {
     /// the Internet
     pub const IN: Self = Self(1);
-    // the CSNET class (Obsolete - used only for examples in some obsolete RFCs)
+    /// the CSNET class (Obsolete - used only for examples in some obsolete RFCs)
     pub const CS: Self = Self(2);
     /// the CHAOS class
     pub const CH: Self = Self(3);
@@ -106,12 +366,42 @@ impl QuestionClass {
     pub const HS: Self = Self(4);
     
     // QCLASS values
-    /// any class
-    pub const ANY: Self = Self(255);
+
+    /// QCLASS NONE     [RFC2136]
+    pub const NONE: Self = Self(254);
+    // QCLASS ANY
+    /// any class (*)
+    pub const ANY: Self  = Self(255);
 
     #[inline]
-    pub fn is_unspecified(&self) -> bool {
-        self.0 == 0 || (self.0 > Self::HS.0 && self.0 < Self::ANY.0)
+    pub fn is_unassigned(&self) -> bool {
+        // 2            0x0002          Unassigned  (NOTE: assigned in [RFC1035])
+        // 5-253        0x0005-0x00FD   Unassigned
+        // 256-65279    0x0100-0xFEFF   Unassigned
+        match self.0 {
+            5 ..= 253 | 256 ..= 65279 => true,
+            _ => false,
+        }
+    }
+
+    #[inline]
+    pub fn is_private_use(&self) -> bool {
+        // 65280-65534      0xFF00-0xFFFE   Reserved for Private Use    [RFC6895]
+        match self.0 {
+            65280 ..= 65534 => true,
+            _ => false,
+        }
+    }
+
+    #[inline]
+    pub fn is_reserved(&self) -> bool {
+        // 0                0x0000          Reserved    [RFC6895]
+        // 65280-65534      0xFF00-0xFFFE   Reserved for Private Use    [RFC6895]
+        // 65535            0xFFFF          Reserved    [RFC6895]
+        match self.0 {
+            0 | 65535 | 65280 ..= 65534 => true,
+            _ => false,
+        }
     }
 }
 
@@ -122,10 +412,21 @@ impl std::fmt::Display for QuestionClass {
             &QuestionClass::CS => write!(f, "CS"),
             &QuestionClass::CH => write!(f, "CH"),
             &QuestionClass::HS => write!(f, "HS"),
-
+            
+            &QuestionClass::NONE => write!(f, "NONE"),
             &QuestionClass::ANY => write!(f, "ANY"),
 
-            _ => write!(f, "UnspecifiedQuestionClass({})", self.0),
+            _ => {
+                if self.is_unassigned() {
+                    write!(f, "Unassigned({})", self.0)
+                } else if self.is_private_use() {
+                    write!(f, "PrivateUse({})", self.0)
+                } else if self.is_reserved() {
+                    write!(f, "Reserved({})", self.0)
+                } else {
+                    write!(f, "Unknow({})", self.0)
+                }
+            },
         }
     }
 }
@@ -164,6 +465,7 @@ impl std::fmt::Display for QuestionClass {
 //                 TYPE field, together with some more general codes which
 //                 can match more than one type of RR.
 // 
+/// 4.1.2. Question section format
 #[derive(PartialEq, Clone)]
 pub struct QuestionPacket<T: AsRef<[u8]>> {
     buffer: T
@@ -362,9 +664,16 @@ impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Display for QuestionPacket<&'a T> {
 }
 
 
+#[derive(Debug, Eq, Hash, Clone, Copy)]
 pub struct Labels<'a> {
     pub(crate) offset: usize,
     pub(crate) data: &'a [u8],
+}
+
+impl<'a> PartialEq for Labels<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        self.data == other.data
+    }
 }
 
 impl<'a> Iterator for Labels<'a> {
@@ -394,8 +703,8 @@ fn test_question_packet() {
 
     let mut pkt = QuestionPacket::new_unchecked(&mut buffer[..]);
     pkt.set_names("www.example.com");
-    pkt.set_qtype(111);
-    pkt.set_qclass(222);
+    pkt.set_qtype(QuestionType(111));
+    pkt.set_qclass(QuestionClass(222));
 
     let buffer = pkt.into_inner();
     let pkt = QuestionPacket::new_checked(&buffer[..]);
@@ -403,7 +712,7 @@ fn test_question_packet() {
 
     let pkt = pkt.unwrap();
     assert_eq!(pkt.labels().collect::<Vec<&str>>().join("."), "www.example.com");
-    assert_eq!(pkt.qtype(), 111);
-    assert_eq!(pkt.qclass(), 222);
+    assert_eq!(pkt.qtype(), QuestionType(111));
+    assert_eq!(pkt.qclass(), QuestionClass(222));
 }
 

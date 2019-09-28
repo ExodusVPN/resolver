@@ -24,6 +24,9 @@ pub use error::Error;
 // 
 
 // Maximum
+/// 63 octets or less
 pub const MAXIMUM_LABEL_SIZE: usize        = 63;
+/// 255 octets or less
 pub const MAXIMUM_NAMES_SIZE: usize        = 255;
+/// 512 octets or less
 pub const MAXIMUM_UDP_MESSAGES_SIZE: usize = 512;

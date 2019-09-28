@@ -1,88 +1,81 @@
+use crate::error::Error;
+use crate::packet::question::Labels;
+use crate::packet::question::QuestionType;
+use crate::packet::question::QuestionClass;
+
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 
 // 3.3. Standard RRs
 // https://tools.ietf.org/html/rfc1035#section-3.3
 // 
-// 3.3.1. CNAME RDATA format
+// 
+// List_of_DNS_record_types
+// https://en.wikipedia.org/wiki/List_of_DNS_record_types
 
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     /                     CNAME                     /
-//     /                                               /
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-// 
-// where:
-// 
-// CNAME           A <domain-name> which specifies the canonical or primary
-//                 name for the owner.  The owner name is an alias.
-// 
-// CNAME RRs cause no additional section processing, but name servers may
-// choose to restart the query at the canonical name in certain cases.  See
-// the description of name server logic in [RFC-1034] for details.
-
-
-// 3.3.2. HINFO RDATA format
-// 
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     /                      CPU                      /
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     /                       OS                      /
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-// 
-// where:
-// 
-// CPU             A <character-string> which specifies the CPU type.
-// 
-// OS              A <character-string> which specifies the operating
-//                 system type.
-// 
-// Standard values for CPU and OS can be found in [RFC-1010].
-// 
-// HINFO records are used to acquire general information about a host.  The
-// main use is for protocols such as FTP that can use special procedures
-// when talking between machines or operating systems of the same type.
-// 
-
-
-// 3.3.3. MB RDATA format (EXPERIMENTAL)
-// 
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     /                   MADNAME                     /
-//     /                                               /
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-// 
-// where:
-// 
-// MADNAME         A <domain-name> which specifies a host which has the
-//                 specified mailbox.
-// MB records cause additional section processing which looks up an A type
-// RRs corresponding to MADNAME.
-
-
-// 3.4. Internet specific RRs
-// https://tools.ietf.org/html/rfc1035#section-3.4
-// 
-// 3.4.1. A RDATA format
-// 
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |                    ADDRESS                    |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-// 
-// where:
-// 
-// ADDRESS         A 32 bit Internet address.
-// 
-// Hosts that have multiple Internet addresses will have multiple A
-// records.
-// 
-// A records cause no additional section processing.  The RDATA section of
-// an A line in a master file is an Internet address expressed as four
-// decimal numbers separated by dots without any imbedded spaces (e.g.,
-// "10.2.0.52" or "192.0.5.6").
-
-use std::net::{Ipv4Addr, Ipv6Addr};
-
-pub enum Record {
+/// resource record value
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub enum Record<'a> {
     A(Ipv4Addr),
     AAAA(Ipv6Addr),
+    CNAME(Labels<'a>),
+    TXT(&'a str),
+    // 3.3.9. MX RDATA format
+    // https://tools.ietf.org/html/rfc1035#section-3.3.9
+    MX {
+        preference: i16,
+        exchange: Labels<'a>,
+    },
+    // 3.3.11. NS RDATA format
+    // https://tools.ietf.org/html/rfc1035#section-3.3.11
+    NS(Labels<'a>),
+    
+    // TODO:
+    // NSEC,
+    // https://tools.ietf.org/html/rfc4034
+    // DNSKEY(),
+    // OPT(),
+    // SOA(),
+    // SRV,
+}
+
+impl<'a> Record<'a> {
+    pub fn parse(kind: QuestionType,
+                 _class: QuestionClass,
+                 rdata: &'a [u8]) -> Result<Option<Record<'a>>, Error> {
+        match kind {
+            QuestionType::A => {
+                if rdata.len() < 4 {
+                    return Err(Error::Truncated);
+                }
+
+                let a = rdata[0];
+                let b = rdata[1];
+                let c = rdata[2];
+                let d = rdata[3];
+
+                Ok(Some(Record::A(Ipv4Addr::new(a, b, c, d))))
+            },
+            QuestionType::AAAA => {
+                if rdata.len() < 16 {
+                    return Err(Error::Truncated);
+                }
+
+                let mut octets = [0u8; 16];
+                &mut octets.copy_from_slice(&rdata[..16]);
+
+                Ok(Some(Record::AAAA(Ipv6Addr::from(octets))))
+            },
+            QuestionType::CNAME => {
+                // TODO:
+                //      1. check MAXIMUM_LABEL_SIZE
+                //      2. check MAXIMUM_NAMES_SIZE
+                //      3. check utf8
+                let labels = Labels { offset: 0, data: rdata };
+                Ok(Some(Record::CNAME(labels)))
+            },
+            _ => Ok(None),
+        }
+    }
 }
 

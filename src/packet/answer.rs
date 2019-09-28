@@ -1,114 +1,9 @@
 use crate::error::Error;
 use crate::packet::question::Labels;
+use crate::packet::question::QuestionType;
+use crate::packet::question::QuestionClass;
 use crate::MAXIMUM_LABEL_SIZE;
 use crate::MAXIMUM_NAMES_SIZE;
-
-
-
-// 16 Bits
-/// two octets containing one of the RR TYPE codes. 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
-pub struct AnswerType(pub u16);
-
-impl AnswerType {
-    /// a host address
-    pub const A: Self     = Self(1);
-    /// an authoritative name server
-    pub const NS: Self    = Self(2);
-    /// a mail destination (Obsolete - use MX)
-    pub const MD: Self    = Self(3);
-    /// a mail forwarder (Obsolete - use MX)
-    pub const MF: Self    = Self(4);
-    /// the canonical name for an alias
-    pub const CNAME: Self = Self(5);
-    /// marks the start of a zone of authority
-    pub const SOA: Self   = Self(6);
-    /// a mailbox domain name (EXPERIMENTAL)
-    pub const MB: Self    = Self(7);
-    /// a mail group member (EXPERIMENTAL)
-    pub const MG: Self    = Self(8);
-    /// a mail rename domain name (EXPERIMENTAL)
-    pub const MR: Self    = Self(9);
-    /// a null RR (EXPERIMENTAL)
-    pub const NULL: Self  = Self(10);
-    /// a well known service description
-    pub const WKS: Self   = Self(11);
-    /// a domain name pointer
-    pub const PTR: Self   = Self(12);
-    /// host information
-    pub const HINFO: Self = Self(13);
-    /// mailbox or mail list information
-    pub const MINFO: Self = Self(14);
-    /// mail exchange
-    pub const MX: Self    = Self(15);
-    /// text strings
-    pub const TXT: Self   = Self(16);
-
-    #[inline]
-    pub fn is_unspecified(&self) -> bool {
-        self.0 == 0 || self.0 > Self::TXT.0
-    }
-}
-
-impl std::fmt::Display for AnswerType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            &AnswerType::A => write!(f, "A"),
-            &AnswerType::NS => write!(f, "NS"),
-            &AnswerType::MD => write!(f, "MD"),
-            &AnswerType::MF => write!(f, "MF"),
-            &AnswerType::CNAME => write!(f, "CNAME"),
-            &AnswerType::SOA => write!(f, "SOA"),
-            &AnswerType::MB => write!(f, "MB"),
-            &AnswerType::MG => write!(f, "MG"),
-            &AnswerType::MR => write!(f, "MR"),
-            &AnswerType::NULL => write!(f, "NULL"),
-            &AnswerType::WKS => write!(f, "WKS"),
-            &AnswerType::PTR => write!(f, "PTR"),
-            &AnswerType::HINFO => write!(f, "HINFO"),
-            &AnswerType::MINFO => write!(f, "MINFO"),
-            &AnswerType::MX => write!(f, "MX"),
-            &AnswerType::TXT => write!(f, "TXT"),
-            
-            _ => write!(f, "UnspecifiedAnswerType({})", self.0),
-        }
-    }
-}
-
-
-// 16 Bits
-/// two octets containing one of the RR CLASS codes.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
-pub struct AnswerClass(pub u16);
-
-impl AnswerClass {
-    /// the Internet
-    pub const IN: Self = Self(1);
-    // the CSNET class (Obsolete - used only for examples in some obsolete RFCs)
-    pub const CS: Self = Self(2);
-    /// the CHAOS class
-    pub const CH: Self = Self(3);
-    /// Hesiod [Dyer 87]
-    pub const HS: Self = Self(4);
-
-    #[inline]
-    pub fn is_unspecified(&self) -> bool {
-        self.0 == 0 || self.0 > Self::HS.0
-    }
-}
-
-impl std::fmt::Display for AnswerClass {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            &AnswerClass::IN => write!(f, "IN"),
-            &AnswerClass::CS => write!(f, "CS"),
-            &AnswerClass::CH => write!(f, "CH"),
-            &AnswerClass::HS => write!(f, "HS"),
-
-            _ => write!(f, "UnspecifiedAnswerClass({})", self.0),
-        }
-    }
-}
 
 
 // 4.1.3. Resource record format
@@ -165,6 +60,8 @@ impl std::fmt::Display for AnswerClass {
 //                 For example, the if the TYPE is A and the CLASS is IN,
 //                 the RDATA field is a 4 octet ARPA Internet address.
 
+/// 4.1.3. Resource record format
+/// The answer, authority, and additional sections all share the same format.
 #[derive(PartialEq, Clone)]
 pub struct AnswerPacket<T: AsRef<[u8]>> {
     buffer: T
@@ -249,20 +146,20 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
     /// two octets containing one of the RR type codes.
     /// This field specifies the meaning of the data in the RDATA field.
     #[inline]
-    pub fn atype(&self) -> u16 {
+    pub fn atype(&self) -> QuestionType {
         let data = self.buffer.as_ref();
 
         let offset = self.last_label_offset().unwrap() + 1;
-        u16::from_be_bytes([ data[offset + 0], data[offset + 1] ])
+        QuestionType(u16::from_be_bytes([ data[offset + 0], data[offset + 1] ]))
     }
 
     /// two octets which specify the class of the data in the RDATA field.
     #[inline]
-    pub fn aclass(&self) -> u16 {
+    pub fn aclass(&self) -> QuestionClass {
         let data = self.buffer.as_ref();
 
         let offset = self.last_label_offset().unwrap() + 1 + 2;
-        u16::from_be_bytes([ data[offset + 0], data[offset + 1] ])
+        QuestionClass(u16::from_be_bytes([ data[offset + 0], data[offset + 1] ]))
     }
 
     /// a 32 bit unsigned integer that specifies the time interval (in seconds) 
@@ -288,6 +185,7 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
 }
 
 impl<'a, T: AsRef<[u8]> + ?Sized> AnswerPacket<&'a T> {
+    /// Name of the node to which this record pertains
     #[inline]
     pub fn labels(&self) -> Labels<'a> {
         let offset = self.last_label_offset().unwrap() + 1;
@@ -298,6 +196,7 @@ impl<'a, T: AsRef<[u8]> + ?Sized> AnswerPacket<&'a T> {
         }
     }
 
+    /// Additional RR-specific data
     #[inline]
     pub fn rdata(&self) -> &'a [u8] {
         let data = self.buffer.as_ref();
@@ -339,7 +238,7 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> AnswerPacket<T> {
     }
 
     #[inline]
-    pub fn set_atype(&mut self, value: AnswerType) {
+    pub fn set_atype(&mut self, value: QuestionType) {
         let offset = self.last_label_offset().unwrap() + 1;
         let data = self.buffer.as_mut();
         let octets = value.0.to_be_bytes();
@@ -352,7 +251,7 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> AnswerPacket<T> {
     }
 
     #[inline]
-    pub fn set_aclass(&mut self, value: AnswerClass) {
+    pub fn set_aclass(&mut self, value: QuestionClass) {
         let offset = self.last_label_offset().unwrap() + 1 + 2;
         let data = self.buffer.as_mut();
         let octets = value.0.to_be_bytes();

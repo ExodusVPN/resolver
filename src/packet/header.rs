@@ -1,7 +1,17 @@
 use crate::error::Error;
-use crate::packet::MessageKind;
+use crate::packet::MessageType;
 use crate::packet::OpCode;
 use crate::packet::ResponseCode;
+
+// DNS Header Flags
+// https://www.iana.org/assignments/dns-parameters/dns-parameters.xhtml#dns-parameters-12
+// bit 5   AA  Authoritative Answer    [RFC1035]
+// bit 6   TC  Truncated Response  [RFC1035]
+// bit 7   RD  Recursion Desired   [RFC1035]
+// bit 8   RA  Recursion Available     [RFC1035]
+// bit 9       Reserved
+// bit 10  AD  Authentic Data  [RFC4035][RFC6840][RFC Errata 4924]
+// bit 11  CD  Checking Disabled   [RFC4035][RFC6840][RFC Errata 4927]
 
 
 // 4.1.1. Header section format
@@ -25,7 +35,7 @@ use crate::packet::ResponseCode;
 //     |                    ARCOUNT                    |
 //     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 // 
-
+/// 4.1.1. Header section format
 #[derive(Debug, PartialEq, Clone)]
 pub struct HeaderPacket<T: AsRef<[u8]>> {
     buffer: T
@@ -46,7 +56,7 @@ impl<T: AsRef<[u8]>> HeaderPacket<T> {
 
         Ok(v)
     }
-    
+
     #[inline]
     pub fn check_len(&self) -> Result<(), Error> {
         let data = self.buffer.as_ref();
@@ -76,17 +86,19 @@ impl<T: AsRef<[u8]>> HeaderPacket<T> {
     // 1 bits
     /// A one bit field that specifies whether this message is a query (0), or a response (1).
     #[inline]
-    pub fn qr(&self) -> MessageKind {
+    pub fn qr(&self) -> MessageType {
         // query (0), or a response (1).
         let data = self.buffer.as_ref();
         let bit = data[2] >> 7;
         if bit == 0 {
-            MessageKind::Query
+            MessageType::Query
         } else {
-            MessageKind::Response
+            MessageType::Response
         }
     }
 
+    // qr  1 bits
+    /// A one bit field that specifies whether this message is a query (0), or a response (1).
     #[inline]
     pub fn is_query(&self) -> bool {
         let data = self.buffer.as_ref();
@@ -94,6 +106,8 @@ impl<T: AsRef<[u8]>> HeaderPacket<T> {
         bit == 0
     }
 
+    // qr  1 bits
+    /// A one bit field that specifies whether this message is a query (0), or a response (1).
     #[inline]
     pub fn is_response(&self) -> bool {
         !self.is_query()
@@ -220,11 +234,11 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> HeaderPacket<T> {
 
     // 1 bits
     #[inline]
-    pub fn set_qr(&mut self, value: MessageKind) {
+    pub fn set_qr(&mut self, value: MessageType) {
         let data = self.buffer.as_mut();
         let mask = match value {
-            MessageKind::Query    => 0b_0000_0000,
-            MessageKind::Response => 0b_1000_0000,
+            MessageType::Query    => 0b_0000_0000,
+            MessageType::Response => 0b_1000_0000,
         };
 
         data[2] |= mask;
