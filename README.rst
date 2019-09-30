@@ -13,6 +13,16 @@ resolver
     cargo run --example tcp 互联网中心.中国
 
 
+疑问
+-------
+
+关于 对 Label 压缩方式，不太确定 LabelPointer 和 LabelString 是否可以混排。
+
+目前看起来有些 DNS 服务器是不支持混排的。
+
+如果有对这个细节比较了解的可以联系我。
+
+
 特性
 -------
 *   支持国际化域名的直接查询 (非 ASCII 域名)
