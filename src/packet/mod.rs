@@ -12,12 +12,6 @@ pub use self::record::*;
 pub use self::name::*;
 
 
-pub fn query_packet_min_size(name: &str) -> usize {
-    // Header Size + NAMES Size + QueryType Size + QueryClass Size
-    //    12       name.len() + 1       2                2
-    12 + name.len() + 1 + 1 + 2 + 2
-}
-
 // 4. MESSAGES
 // 4.1. Format
 // https://tools.ietf.org/html/rfc1035#section-4
@@ -440,11 +434,46 @@ impl Class {
             _ => false,
         }
     }
+
+    /// 5.4.  Questions Requesting Unicast Responses
+    /// https://tools.ietf.org/html/rfc6762#section-5.4
+    /// 
+    /// To avoid large floods of potentially unnecessary responses in these
+    /// cases, Multicast DNS defines the top bit in the class field of a DNS
+    /// question as the unicast-response bit.  When this bit is set in a
+    /// question, it indicates that the querier is willing to accept unicast
+    /// replies in response to this specific query, as well as the usual
+    /// multicast responses.  These questions requesting unicast responses
+    /// are referred to as "QU" questions, to distinguish them from the more
+    /// usual questions requesting multicast responses ("QM" questions).  A
+    /// Multicast DNS querier sending its initial batch of questions
+    /// immediately on wake from sleep or interface activation SHOULD set the
+    /// unicast-response bit in those questions.
+    #[inline]
+    pub fn is_unicast(&self) -> bool {
+        self.0 >> 15 == 1
+    }
+
+    #[inline]
+    pub fn set_unicast(&self) -> bool {
+        self.0 >> 15 == 1
+    }
+
+    #[inline]
+    pub fn class(&self) -> Self {
+        if self.is_unicast() {
+            Self(self.0 << 1 >> 1)
+        } else {
+            *self
+        }
+    }
 }
 
 impl std::fmt::Display for Class {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
+        let class = if self.is_unicast() { self.class() } else { *self };
+
+        match &class {
             &Class::IN => write!(f, "IN"),
             &Class::CS => write!(f, "CS"),
             &Class::CH => write!(f, "CH"),
@@ -454,14 +483,14 @@ impl std::fmt::Display for Class {
             &Class::ANY => write!(f, "ANY"),
 
             _ => {
-                if self.is_unassigned() {
-                    write!(f, "Unassigned({})", self.0)
-                } else if self.is_private_use() {
-                    write!(f, "PrivateUse({})", self.0)
-                } else if self.is_reserved() {
-                    write!(f, "Reserved({})", self.0)
+                if class.is_unassigned() {
+                    write!(f, "Unassigned({})", class.0)
+                } else if class.is_private_use() {
+                    write!(f, "PrivateUse({})", class.0)
+                } else if class.is_reserved() {
+                    write!(f, "Reserved({})", class.0)
                 } else {
-                    write!(f, "Unknow({})", self.0)
+                    write!(f, "Unknow({})", class.0)
                 }
             },
         }

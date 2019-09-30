@@ -112,17 +112,9 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
     #[inline]
     pub fn aclass(&self) -> Class {
         let data = self.buffer.as_ref();
-        // TODO:
-        // 
-        // let prefer_unicast = value & 0x8000 == 0x8000;
-        // let qclass_code = value & 0x7FFF;
-        // 
-        // let is_unique = value & 0x8000 == 0x8000;
-        // let class_code = value & 0x7FFF;
-        // 
         let num = u16::from_be_bytes([ data[2], data[3] ]);
 
-        Class(num & 0x7FFF)
+        Class(num)
     }
 
     /// a 32 bit unsigned integer that specifies the time interval (in seconds) 
@@ -148,6 +140,7 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
         u16::from_be_bytes([ data[8], data[9] ])
     }
 
+    #[inline]
     pub fn len(&self) -> usize {
         10 + self.rdlen() as usize
     }

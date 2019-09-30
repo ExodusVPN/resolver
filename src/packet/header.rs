@@ -283,7 +283,7 @@ impl Flags {
 pub struct HeaderPacket<T: AsRef<[u8]>> {
     buffer: T
 }
-
+    
 impl<T: AsRef<[u8]>> HeaderPacket<T> {
     pub const HEADER_SIZE: usize = 12;
 
@@ -359,6 +359,11 @@ impl<T: AsRef<[u8]>> HeaderPacket<T> {
         let data = self.buffer.as_ref();
         u16::from_be_bytes([ data[10], data[11] ])
     }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        Self::HEADER_SIZE
+    }
 }
 
 impl<'a, T: AsRef<[u8]> + ?Sized> HeaderPacket<&'a T> {
@@ -418,7 +423,6 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> HeaderPacket<T> {
         data[10] = octets[0];
         data[11] = octets[1];
     }
-
 
     #[inline]
     pub fn payload_mut(&mut self) -> &mut [u8]{
