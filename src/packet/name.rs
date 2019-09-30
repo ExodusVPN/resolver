@@ -350,14 +350,19 @@ pub fn read_name<'a>(packet_offset: usize, packet: &'a [u8]) -> Result<Name<'a>,
             let label_len = packet[pointer];
             offset += 2;
 
-            if label_len == 0 {
-                // a sequence of labels ending with a pointer
-                break;
-            }
+            // if label_len == 0 {
+            //     // a sequence of labels ending with a pointer
+            //     break;
+            // }
 
             if label_len as usize > MAXIMUM_LABEL_SIZE {
                 return Err(Error::LabelSizeLimitExceeded);
             }
+
+            // break;
+            let len = 2;
+            return Ok(Name { offset: pointer as usize, packet, len });
+            // return read_name(pointer as usize, packet);
 
         } else {
             // a sequence of labels ending in a zero octet

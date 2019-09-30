@@ -13,7 +13,7 @@ fn main() -> Result<(), io::Error> {
     // Example:
     //      $ cargo run --example tcp www.gov.cn
     let name = env::args().skip(1).next().expect("请在命令行参数当中加上需要查询的域名！");
-    
+
     let name_server = "8.8.8.8:53";       // 第三方
     println!("NameServer: {:?} Name: {:?}\n", name_server, name);
     let mut conn = TcpStream::connect(name_server)?;
@@ -76,7 +76,6 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
     let buffer = &buffer[..amt];
     println!("{:?}", &buffer);
 
-
     let hdr = packet::HeaderPacket::new_checked(&buffer[..])?;
     let qdcount = hdr.qdcount() as usize;
     let ancount = hdr.ancount() as usize;
@@ -90,7 +89,6 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
     for i in 0..qdcount {
         let qname = packet::read_name(offset, &buffer)?;
         let qname_len = qname.len();
-
         offset += qname_len;
 
         let pkt = packet::QuestionPacket::new_checked(&buffer[offset..])?;
@@ -100,12 +98,11 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
     }
     
     
-
     for i in 0..ancount {
         let qname = packet::read_name(offset, &buffer)?;
         let qname_len = qname.len();
         // FIXME: 压缩域名的写法还需要再多做些测试。
-        offset += qname_len - 1;
+        offset += qname_len;
         let pkt = packet::AnswerPacket::new_checked(&buffer[offset..])?;
         offset += pkt.len();
 
@@ -122,7 +119,7 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
         let qname = packet::read_name(offset, &buffer)?;
         let qname_len = qname.len();
         // FIXME: 压缩域名的写法还需要再多做些测试。
-        offset += qname_len - 1;
+        offset += qname_len;
         let pkt = packet::AnswerPacket::new_checked(&buffer[offset..])?;
         offset += pkt.len();
         
@@ -139,7 +136,8 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
         let qname = packet::read_name(offset, &buffer)?;
         let qname_len = qname.len();
         // FIXME: 压缩域名的写法还需要再多做些测试。
-        offset += qname_len - 1;
+        offset += qname_len;
+
         let pkt = packet::AnswerPacket::new_checked(&buffer[offset..])?;
         offset += pkt.len();
         
