@@ -9,8 +9,8 @@ resolver
 
 .. code:: bash
     
-    cargo run --example baidu.com
-    cargo run --example 互联网中心.中国
+    cargo run --example tcp baidu.com
+    cargo run --example tcp 互联网中心.中国
 
 
 特性
