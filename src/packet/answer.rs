@@ -1,10 +1,6 @@
 use crate::error::Error;
-use crate::packet::question::Labels;
-use crate::packet::question::QuestionType;
-use crate::packet::question::QuestionClass;
-use crate::MAXIMUM_LABEL_SIZE;
-use crate::MAXIMUM_NAMES_SIZE;
-
+use crate::packet::Kind;
+use crate::packet::Class;
 
 // 4.1.3. Resource record format
 // https://tools.ietf.org/html/rfc1035#section-4.1.3
@@ -85,9 +81,13 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
     #[inline]
     pub fn check_len(&self) -> Result<(), Error> {
         let data = self.buffer.as_ref();
-        let min_size = self.last_label_offset()? + 1 + 2 + 2;
+        let min_size = 10;
         
         if data.len() < min_size {
+            return Err(Error::Truncated);
+        }
+
+        if data.len() < min_size + self.rdlen() as usize {
             return Err(Error::Truncated);
         }
 
@@ -99,75 +99,18 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
         self.buffer
     }
 
-    fn last_label_offset(&self) -> Result<usize, Error> {
-        let data = self.buffer.as_ref();
-        
-        let mut names_length = 0usize;
-        let mut labels_count = 0usize;
-        let mut idx = 0usize;
-        loop {
-            if idx >= data.len() {
-                return Err(Error::Truncated);
-            }
-
-            let len = data[idx] as usize;
-            if len == 0 {
-                break;
-            }
-
-            if data[0] & 0b_1100_0000 == 0b_1100_0000 {
-                let offset = u16::from_be_bytes([ data[idx + 0], data[idx + 1] ]) & 0b_0011_1111_1111_1111;
-
-                idx += 2;
-                labels_count += 1;
-                continue;
-            }
-
-            if len > MAXIMUM_LABEL_SIZE {
-                return Err(Error::LabelSizeLimitExceeded);
-            }
-
-            let start = idx + 1;
-
-            idx += len + 1;
-            labels_count += 1;
-            names_length += len;
-
-            let end = idx;
-            match &data.get(start..end) {
-                Some(s) => {
-                    if let Err(_) = std::str::from_utf8(s) {
-                        return Err(Error::InvalidUtf8Sequence);
-                    }
-                },
-                None => return Err(Error::Truncated),
-            }
-        }
-
-        if names_length + labels_count > MAXIMUM_NAMES_SIZE + 1 {
-            return Err(Error::NamesSizeLimitExceeded);
-        }
-
-        if data[idx] == 0 {
-            idx -= 1;
-        }
-
-        Ok(idx)
-    }
-
     /// two octets containing one of the RR type codes.
     /// This field specifies the meaning of the data in the RDATA field.
     #[inline]
-    pub fn atype(&self) -> QuestionType {
+    pub fn atype(&self) -> Kind {
         let data = self.buffer.as_ref();
 
-        let offset = self.last_label_offset().unwrap() + 1;
-        QuestionType(u16::from_be_bytes([ data[offset + 0], data[offset + 1] ]))
+        Kind(u16::from_be_bytes([ data[0], data[1] ]))
     }
 
     /// two octets which specify the class of the data in the RDATA field.
     #[inline]
-    pub fn aclass(&self) -> QuestionClass {
+    pub fn aclass(&self) -> Class {
         let data = self.buffer.as_ref();
         // TODO:
         // 
@@ -177,10 +120,9 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
         // let is_unique = value & 0x8000 == 0x8000;
         // let class_code = value & 0x7FFF;
         // 
-        let offset = self.last_label_offset().unwrap() + 1 + 2;
-        let num = u16::from_be_bytes([ data[offset + 0], data[offset + 1] ]);
+        let num = u16::from_be_bytes([ data[2], data[3] ]);
 
-        QuestionClass(num & 0x7FFF)
+        Class(num & 0x7FFF)
     }
 
     /// a 32 bit unsigned integer that specifies the time interval (in seconds) 
@@ -190,11 +132,9 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
     #[inline]
     pub fn ttl(&self) -> u32 {
         let data = self.buffer.as_ref();
-
-        let offset = self.last_label_offset().unwrap() + 1 + 2 + 2;
         let num = u32::from_be_bytes([
-            data[offset+0], data[offset+1],
-            data[offset+2], data[offset+3]
+            data[4], data[5],
+            data[6], data[7],
         ]);
 
         if num > std::i32::MAX as u32 { 0 } else { num }
@@ -205,35 +145,26 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
     pub fn rdlen(&self) -> u16 {
         let data = self.buffer.as_ref();
 
-        let offset = self.last_label_offset().unwrap() + 1 + 2 + 2 + 4;
-        u16::from_be_bytes([ data[offset + 0], data[offset + 1] ])
+        u16::from_be_bytes([ data[8], data[9] ])
+    }
+
+    pub fn len(&self) -> usize {
+        10 + self.rdlen() as usize
     }
 }
 
 impl<'a, T: AsRef<[u8]> + ?Sized> AnswerPacket<&'a T> {
-    /// Name of the node to which this record pertains
-    #[inline]
-    pub fn labels(&self) -> Labels<'a> {
-        let offset = self.last_label_offset().unwrap() + 1;
-        let data = self.buffer.as_ref();
-        Labels {
-            offset: 0,
-            data: &data[..offset],
-        }
-    }
-
     /// Additional RR-specific data
     #[inline]
     pub fn rdata(&self) -> &'a [u8] {
-        let offset = self.last_label_offset().unwrap() + 1 + 2 + 2 + 4 + 2;
         let data = self.buffer.as_ref();
 
-        &data[offset..offset + self.rdlen() as usize]
+        &data[10..10 + self.rdlen() as usize]
     }
 
     #[inline]
     pub fn payload(&self) -> &'a [u8] {
-        let offset = self.last_label_offset().unwrap() + 1 + 2 + 2 + 4 + 2 + self.rdlen() as usize;
+        let offset = 10 + self.rdlen() as usize;
         let data = self.buffer.as_ref();
 
         &data[offset..]
@@ -242,97 +173,55 @@ impl<'a, T: AsRef<[u8]> + ?Sized> AnswerPacket<&'a T> {
 
 impl<T: AsRef<[u8]> + AsMut<[u8]>> AnswerPacket<T> {
     #[inline]
-    pub fn set_names(&mut self, value: &str) {
-        assert!(value.len() <= MAXIMUM_NAMES_SIZE);
-        let data = self.buffer.as_mut();
-
-        let mut offset = 0usize;
-        for label in value.split('.') {
-            assert!(label.len() <= MAXIMUM_LABEL_SIZE);
-
-            data[offset] = label.len() as u8;
-            let start = offset + 1;
-            let end = start + label.len();
-
-            &mut data[start..end].copy_from_slice(label.as_bytes());
-            offset += 1 + label.len();
-        }
-
-        if data[offset] != 0 {
-            data[offset] = 0;
-        }
-    }
-
-    #[inline]
-    pub fn set_atype(&mut self, value: QuestionType) {
-        let offset = self.last_label_offset().unwrap() + 1;
+    pub fn set_atype(&mut self, value: Kind) {
         let data = self.buffer.as_mut();
         let octets = value.0.to_be_bytes();
 
-        // NOTE: 确保名字先存储了！
-        assert_eq!(data[offset-1], 0);
-
-        data[offset + 0] = octets[0];
-        data[offset + 1] = octets[1];
+        data[0] = octets[0];
+        data[1] = octets[1];
     }
 
     #[inline]
-    pub fn set_aclass(&mut self, value: QuestionClass) {
-        let offset = self.last_label_offset().unwrap() + 1 + 2;
+    pub fn set_aclass(&mut self, value: Class) {
         let data = self.buffer.as_mut();
         let octets = value.0.to_be_bytes();
 
-        // NOTE: 确保名字先存储了！
-        assert_eq!(data[offset-3], 0);
-
-        data[offset + 0] = octets[0];
-        data[offset + 1] = octets[1];
+        data[2] = octets[0];
+        data[3] = octets[1];
     }
 
 
     #[inline]
     pub fn set_ttl(&mut self, value: u32) {
-        let offset = self.last_label_offset().unwrap() + 1 + 2 + 2;
         let data = self.buffer.as_mut();
         let octets = value.to_be_bytes();
 
-        // NOTE: 确保名字先存储了！
-        assert_eq!(data[offset-5], 0);
-
-        data[offset + 0] = octets[0];
-        data[offset + 1] = octets[1];
-        data[offset + 2] = octets[2];
-        data[offset + 3] = octets[3];
+        data[4] = octets[0];
+        data[5] = octets[1];
+        data[6] = octets[2];
+        data[7] = octets[3];
     }
 
     #[inline]
     pub fn set_rdlen(&mut self, value: u16) {
-        let offset = self.last_label_offset().unwrap() + 1 + 2 + 2 + 4;
         let data = self.buffer.as_mut();
         let octets = value.to_be_bytes();
 
-        // NOTE: 确保名字先存储了！
-        assert_eq!(data[offset-9], 0);
-
-        data[offset + 0] = octets[0];
-        data[offset + 1] = octets[1];
+        data[8] = octets[0];
+        data[9] = octets[1];
     }
 
     #[inline]
     pub fn rdata_mut(&mut self) -> &mut [u8] {
-        let offset = self.last_label_offset().unwrap() + 1 + 2 + 2 + 4 + 2;
-        let rdlen = self.rdlen() as usize;
+        let offset = 10 + self.rdlen() as usize;
         let data = self.buffer.as_mut();
 
-        // NOTE: 确保名字先存储了！
-        assert_eq!(data[offset-11], 0);
-
-        &mut data[offset..rdlen]
+        &mut data[10..offset]
     }
 
     #[inline]
     pub fn payload_mut(&mut self) -> &mut [u8]{
-        let offset = self.last_label_offset().unwrap() + 1 + 2 + 2 + 4 + 2 + self.rdlen() as usize;
+        let offset = 10 + self.rdlen() as usize;
         let data = self.buffer.as_mut();
         
         &mut data[offset..]
@@ -341,9 +230,7 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> AnswerPacket<T> {
 
 impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Debug for AnswerPacket<&'a T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "AnswerPacket {{ labels: {:?}, atype: {:?}, aclass: {:?}, ttl: {:?}, rdlen: {:?}, rdata: {:?} }}",
-                // self.labels().collect::<Vec<&str>>(),
-                self.labels(),
+        write!(f, "AnswerPacket {{ atype: {:?}, aclass: {:?}, ttl: {:?}, rdlen: {:?}, rdata: {:?} }}",
                 self.atype(),
                 self.aclass(),
                 self.ttl(),
@@ -355,9 +242,7 @@ impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Debug for AnswerPacket<&'a T> {
 
 impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Display for AnswerPacket<&'a T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "AnswerPacket {{ labels: {:?}, atype: {}, aclass: {}, ttl: {}, rdlen: {}, rdata: {:?} }}",
-                // self.labels().collect::<Vec<&str>>(),
-                self.labels(),
+        write!(f, "AnswerPacket {{ atype: {}, aclass: {}, ttl: {}, rdlen: {}, rdata: {:?} }}",
                 self.atype(),
                 self.aclass(),
                 self.ttl(),
@@ -366,5 +251,3 @@ impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Display for AnswerPacket<&'a T> {
         )
     }
 }
-
-

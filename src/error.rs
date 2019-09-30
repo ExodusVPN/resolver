@@ -8,6 +8,7 @@ pub enum Error {
     // 512 octets or less
     UdpMessagesSizeLimitExceeded,
     InvalidDomainName,
+    InvalidDomainNameLabel,
     InvalidUtf8Sequence,
     /// An incoming packet could not be parsed because some of its fields were out of bounds of the received data.
     Truncated,

@@ -1,17 +1,260 @@
 use crate::error::Error;
-use crate::packet::MessageType;
 use crate::packet::OpCode;
 use crate::packet::ResponseCode;
 
-// DNS Header Flags
-// https://www.iana.org/assignments/dns-parameters/dns-parameters.xhtml#dns-parameters-12
-// bit 5   AA  Authoritative Answer    [RFC1035]
-// bit 6   TC  Truncated Response  [RFC1035]
-// bit 7   RD  Recursion Desired   [RFC1035]
-// bit 8   RA  Recursion Available     [RFC1035]
-// bit 9       Reserved
-// bit 10  AD  Authentic Data  [RFC4035][RFC6840][RFC Errata 4924]
-// bit 11  CD  Checking Disabled   [RFC4035][RFC6840][RFC Errata 4927]
+
+bitflags! {
+    // DNS Header Flags
+    // https://www.iana.org/assignments/dns-parameters/dns-parameters.xhtml#dns-parameters-12
+    pub struct Flags: u16 {
+        // QR      1 bits
+        const QR_REQ = 0b_0000_0000_0000_0000;
+        const QR_RES = 0b_1000_0000_0000_0000;
+        
+        // Opcode  4 bits
+        const OP_QUERY    = 0b_0000_0000_0000_0000; /// Query                            RFC1035
+        const OP_IQUERY   = 0b_0000_1000_0000_0000; /// inverse query, obsoleted.        RFC1035, RFC3425
+        const OP_STATUS   = 0b_0001_0000_0000_0000; /// a server status request (STATUS) RFC1035
+        const OP_NOTIFY   = 0b_0010_0000_0000_0000; /// notify                           RFC1996
+        const OP_UPDATE   = 0b_0010_1000_0000_0000; /// Update                           RFC2136
+        const OP_DSO      = 0b_0011_0000_0000_0000; /// DNS Stateful Operations (DSO)    RFC8490
+        // OpCode   7-15    Unassigned
+
+        const AA          = 0b_0000_0100_0000_0000; // Authoritative Answer
+        const TC          = 0b_0000_0010_0000_0000; // TrunCation
+        const RD          = 0b_0000_0001_0000_0000; // Recursion Desired
+        const RA          = 0b_0000_0000_1000_0000; // Recursion Available
+
+        // https://tools.ietf.org/html/rfc3225#section-3
+        // 
+        // explicit notification of the ability of
+        // the client to accept (if not understand) DNSSEC security RRs.
+        // 
+        // https://tools.ietf.org/html/rfc4035#section-4.9.1
+        // 
+        // A validating security-aware stub resolver MUST set the DO bit,
+        // because otherwise it will not receive the DNSSEC RRs it needs to
+        // perform signature validation.
+        const DO          = 0b_0000_0000_0100_0000;
+        // https://tools.ietf.org/html/rfc3655#section-2
+        // 
+        // If the CD bit is set, the server will not perform checking, 
+        // but SHOULD still set the AD bit if the data has already been cryptographically verified or
+        // complies with local policy.  The AD bit MUST only be set if DNSSEC
+        // records have been requested via the DO bit RFC3225 and relevant SIG
+        // records are returned.
+        // 
+        // https://tools.ietf.org/html/rfc4035#section-4.9.3
+        // 
+        // A validating security-aware stub resolver SHOULD NOT examine the
+        // setting of the AD bit in response messages, as, by definition, the
+        // stub resolver performs its own signature validation regardless of the
+        // setting of the AD bit.
+        const AD          = 0b_0000_0000_0010_0000; // Authentic Data    RFC4035, RFC6840, RFC Errata 4924
+        // https://tools.ietf.org/html/rfc4035#section-4.9.2
+        // 
+        // A validating security-aware stub resolver SHOULD set the CD bit
+        // because otherwise the security-aware recursive name server will
+        // answer the query using the name server's local policy, which may
+        // prevent the stub resolver from receiving data that would be
+        // acceptable to the stub resolver's local policy.
+        const CD          = 0b_0000_0000_0001_0000; // Checking Disabled RFC4035, RFC6840, RFC Errata 4927
+
+        // response code (RCODE)  4 bits
+        /// No Error   RFC1035
+        /// No error condition
+        const RCODE_OK                  = 0b_0000_0000_0000_0000;
+        /// Format Error   RFC1035
+        /// Format error - The name server was unable to interpret the query.
+        const RCODE_FORMAT_ERROR        = 0b_0000_0000_0000_0001;
+        /// Server Failure  RFC1035
+        /// Server failure - The name server was unable to 
+        /// process this query due to a problem with the name server.
+        const RCODE_SERVER_FAILURE      = 0b_0000_0000_0000_0010;
+        /// Non-Existent Domain     RFC1035
+        /// Name Error - Meaningful only for responses from 
+        /// an authoritative name server, this code signifies that the
+        /// domain name referenced in the query does not exist.
+        const RCODE_NON_EXISTENT_DOMAIN = 0b_0000_0000_0000_0011;
+        /// Not Implemented     RFC1035
+        /// Not Implemented - The name server does
+        /// not support the requested kind of query.
+        const RCODE_NOT_IMPLEMENTED     = 0b_0000_0000_0000_0100;
+        /// Query Refused   RFC1035
+        /// Refused - The name server refuses to perform the specified operation for policy reasons.
+        /// For example, a name server may not wish to provide the information 
+        /// to the particular requester, or a name server may not wish to perform
+        /// a particular operation (e.g., zone transfer) for particular data.
+        const RCODE_QUERY_REFUSED       = 0b_0000_0000_0000_0101;
+        /// YXDomain    Name Exists when it should not  RFC2136 RFC6672
+        const RCODE_YXDOMAIN            = 0b_0000_0000_0000_0110;
+        /// YXRRSet     RR Set Exists when it should not    RFC2136
+        const RCODE_YXRRSET             = 0b_0000_0000_0000_0111;
+        /// NXRRSet     RR Set that should exist does not   RFC2136
+        const RCODE_NXRRSET             = 0b_0000_0000_0000_1000;
+        /// NotAuth     Server Not Authoritative for zone   RFC2136
+        /// NotAuth     Not Authorized  RFC2845
+        const RCODE_NOT_AUTH            = 0b_0000_0000_0000_1001;
+        /// NotZone     Name not contained in zone  RFC2136
+        const RCODE_NOT_ZONE            = 0b_0000_0000_0000_1010;
+        
+        const REQUEST           = Self::QR_REQ.bits | Self::OP_QUERY.bits | Self::RCODE_OK.bits;
+        const RECURSION_REQUEST = Self::REQUEST.bits | Self::RD.bits;
+    }
+}
+
+impl Flags {
+    pub fn new_unchecked(bits: u16) -> Self {
+        unsafe {
+            Self::from_bits_unchecked(bits)
+        }
+    }
+
+    // 1 bits
+    /// A one bit field that specifies whether this message is a query (0), or a response (1).
+    pub fn qr(&self) -> bool {
+        self.bits >> 15 == 1
+    }
+
+    // 4 bits
+    /// A four bit field that specifies kind of query in this message.
+    /// This value is set by the originator of a query and copied into the response.
+    pub fn opcode(&self) -> OpCode {
+        let bits = ((self.bits << 1)  >> 12) as u8;
+        OpCode::new(bits)
+    }
+
+    // 1 bits
+    /// Authoritative Answer - this bit is valid in responses,
+    /// and specifies that the responding name server is an 
+    /// authority for the domain name in question section.
+    /// Note that the contents of the answer section may have
+    /// multiple owner names because of aliases.  The AA bit
+    /// corresponds to the name which matches the query name, or
+    /// the first owner name in the answer section.
+    pub fn aa(&self) -> bool {
+        (self.bits & 0b_0000_0100_0000_0000) >> 10 == 1
+    }
+
+    // 1 bits
+    /// TrunCation - specifies that this message was truncated
+    /// due to length greater than that permitted on the
+    /// transmission channel.
+    pub fn tc(&self) -> bool {
+        (self.bits & 0b_0000_0010_0000_0000) >> 9 == 1
+    }
+
+    // 1 bits
+    /// Recursion Desired - this bit may be set in a query and
+    /// is copied into the response.  If RD is set, it directs
+    /// the name server to pursue the query recursively.
+    /// Recursive query support is optional.
+    pub fn rd(&self) -> bool {
+        (self.bits & 0b_0000_0001_0000_0000) >> 8 == 1
+    }
+
+    // 1 bits
+    /// Recursion Available - this be is set or cleared in a response,
+    /// and denotes whether recursive query support is available in the name server.
+    pub fn ra(&self) -> bool {
+        (self.bits & 0b_0000_0000_1000_0000) >> 7 == 1
+    }
+
+    pub fn do_(&self) -> bool {
+        (self.bits & 0b_0000_0000_0100_0000) >> 6 == 1
+    }
+
+    pub fn ad(&self) -> bool {
+        (self.bits & 0b_0000_0000_0010_0000) >> 5 == 1
+    }
+
+    pub fn cd(&self) -> bool {
+        (self.bits & 0b_0000_0000_0001_0000) >> 4 == 1
+    }
+
+    // 4 bits
+    /// Response code - this 4 bit field is set as part of responses.
+    pub fn rcode(&self) -> ResponseCode {
+        let bits = (self.bits & 0b_0000_0000_0000_1111) as u8;
+        ResponseCode::new(bits)
+    }
+
+    pub fn set_qr(&mut self, value: bool) {
+        if value {
+            self.bits |= 0b_1000_0000_0000_0000;
+        } else {
+            self.bits &= 0b_0111_1111_1111_1111;
+        }
+    }
+
+    pub fn set_opcode(&mut self, value: OpCode) {
+        let code = value.code() as u16;
+        self.bits &= 0b_1000_0111_1111_1111;
+        self.bits |= code << 11;
+    }
+
+    pub fn set_aa(&mut self, value: bool) {
+        if value {
+            self.bits |= 0b_0000_0100_0000_0000;
+        } else {
+            self.bits &= 0b_1111_1011_1111_1111;
+        }
+    }
+
+    pub fn set_tc(&mut self, value: bool) {
+        if value {
+            self.bits |= 0b_0000_0010_0000_0000;
+        } else {
+            self.bits &= 0b_1111_1101_1111_1111;
+        }
+    }
+
+    pub fn set_rd(&mut self, value: bool) {
+        if value {
+            self.bits |= 0b_0000_0001_0000_0000;
+        } else {
+            self.bits &= 0b_1111_1110_1111_1111;
+        }
+    }
+
+    pub fn set_ra(&mut self, value: bool) {
+        if value {
+            self.bits |= 0b_0000_0000_1000_0000;
+        } else {
+            self.bits &= 0b_1111_1111_0111_1111;
+        }
+    }
+
+    pub fn set_do_(&mut self, value: bool) {
+        if value {
+            self.bits |= 0b_0000_0000_0100_0000;
+        } else {
+            self.bits &= 0b_1111_1111_1011_1111;
+        }
+    }
+
+    pub fn set_ad(&mut self, value: bool) {
+        if value {
+            self.bits |= 0b_0000_0000_0010_0000;
+        } else {
+            self.bits &= 0b_1111_1111_1101_1111;
+        }
+    }
+
+    pub fn set_cd(&mut self, value: bool) {
+        if value {
+            self.bits |= 0b_0000_0000_0001_0000;
+        } else {
+            self.bits &= 0b_1111_1111_1110_1111;
+        }
+    }
+
+    pub fn set_rcode(&mut self, value: ResponseCode) {
+        let code = value.code() as u16;
+        self.bits &= 0b_1111_1111_1111_0000;
+        self.bits |= code;
+    }
+}
 
 
 // 4.1.1. Header section format
@@ -81,107 +324,10 @@ impl<T: AsRef<[u8]>> HeaderPacket<T> {
         u16::from_be_bytes([ data[0], data[1] ])
     }
 
-    // Offset: 2
-
-    // 1 bits
-    /// A one bit field that specifies whether this message is a query (0), or a response (1).
     #[inline]
-    pub fn qr(&self) -> MessageType {
-        // query (0), or a response (1).
+    pub fn flags(&self) -> Flags {
         let data = self.buffer.as_ref();
-        let bit = data[2] >> 7;
-        if bit == 0 {
-            MessageType::Query
-        } else {
-            MessageType::Response
-        }
-    }
-
-    // qr  1 bits
-    /// A one bit field that specifies whether this message is a query (0), or a response (1).
-    #[inline]
-    pub fn is_query(&self) -> bool {
-        let data = self.buffer.as_ref();
-        let bit = data[2] >> 7;
-        bit == 0
-    }
-
-    // qr  1 bits
-    /// A one bit field that specifies whether this message is a query (0), or a response (1).
-    #[inline]
-    pub fn is_response(&self) -> bool {
-        !self.is_query()
-    }
-
-    // 4 bits
-    /// A four bit field that specifies kind of query in this message.
-    /// This value is set by the originator of a query and copied into the response.
-    #[inline]
-    pub fn opcode(&self) -> OpCode {
-        let data = self.buffer.as_ref();
-        OpCode::new((data[2] << 1)  >> 4)
-    }
-
-    // 1 bits
-    /// Authoritative Answer - this bit is valid in responses,
-    /// and specifies that the responding name server is an 
-    /// authority for the domain name in question section.
-    /// Note that the contents of the answer section may have
-    /// multiple owner names because of aliases.  The AA bit
-    /// corresponds to the name which matches the query name, or
-    /// the first owner name in the answer section.
-    #[inline]
-    pub fn aa(&self) -> bool {
-        let data = self.buffer.as_ref();
-        (data[2] & 0b_0000_0100) >> 2 == 1
-    }
-
-    // 1 bits
-    /// TrunCation - specifies that this message was truncated
-    /// due to length greater than that permitted on the
-    /// transmission channel.
-    #[inline]
-    pub fn tc(&self) -> bool {
-        let data = self.buffer.as_ref();
-        (data[2] & 0b_0000_0010) >> 1 == 1
-    }
-
-    // 1 bits
-    /// Recursion Desired - this bit may be set in a query and
-    /// is copied into the response.  If RD is set, it directs
-    /// the name server to pursue the query recursively.
-    /// Recursive query support is optional.
-    #[inline]
-    pub fn rd(&self) -> bool {
-        let data = self.buffer.as_ref();
-        (data[2] & 0b_0000_0001) == 1
-    }
-
-    // Offset: 3
-
-    // 1 bits
-    /// Recursion Available - this be is set or cleared in a response,
-    /// and denotes whether recursive query support is available in the name server.
-    #[inline]
-    pub fn ra(&self) -> bool {
-        let data = self.buffer.as_ref();
-        data[3] >> 7 == 1
-    }
-
-    // 3 bits
-    /// Reserved for future use.  Must be zero in all queries and responses.
-    #[inline]
-    pub fn z(&self) -> u8 {
-        let data = self.buffer.as_ref();
-        data[3] << 1 >> 5
-    }
-
-    // 4 bits
-    /// Response code - this 4 bit field is set as part of responses.
-    #[inline]
-    pub fn rcode(&self) -> ResponseCode {
-        let data = self.buffer.as_ref();
-        ResponseCode::new(data[3] << 4 >> 4)
+        Flags::new_unchecked(u16::from_be_bytes([ data[2], data[3] ]))
     }
 
     /// an unsigned 16 bit integer specifying the number of entries in the question section.
@@ -232,93 +378,13 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> HeaderPacket<T> {
         data[1] = octets[1];
     }
 
-    // 1 bits
     #[inline]
-    pub fn set_qr(&mut self, value: MessageType) {
+    pub fn set_flags(&mut self, value: Flags) {
         let data = self.buffer.as_mut();
-        let mask = match value {
-            MessageType::Query    => 0b_0000_0000,
-            MessageType::Response => 0b_1000_0000,
-        };
+        let octets = value.bits.to_be_bytes();
 
-        data[2] |= mask;
-    }
-
-    // 4 bits
-    #[inline]
-    pub fn set_opcode(&mut self, value: OpCode) {
-        let data = self.buffer.as_mut();
-        let code = value.code();
-        
-        data[2] |= code << 3;
-    }
-
-    // 1 bits
-    #[inline]
-    pub fn set_aa(&mut self, value: bool) {
-        let data = self.buffer.as_mut();
-
-        if value {
-            data[2] |= 0b_0000_0100;
-        } else {
-            data[2] &= 0b_1111_1011;
-        }
-    }
-
-    // 1 bits
-    #[inline]
-    pub fn set_tc(&mut self, value: bool) {
-        let data = self.buffer.as_mut();
-
-        if value {
-            data[2] |= 0b_0000_0010;
-        } else {
-            data[2] &= 0b_1111_1101;
-        }
-    }
-
-    // 1 bits
-    #[inline]
-    pub fn set_rd(&mut self, value: bool) {
-        let data = self.buffer.as_mut();
-
-        if value {
-            data[2] |= 0b_0000_0001;
-        } else {
-            data[2] &= 0b_1111_1110;
-        }
-    }
-    
-
-    // 1 bits
-    #[inline]
-    pub fn set_ra(&mut self, value: bool) {
-        let data = self.buffer.as_mut();
-
-        if value {
-            data[3] |= 0b_1000_0000;
-        } else {
-            data[3] &= 0b_0111_1111;
-        }
-    }
-
-    // 3 bits
-    #[inline]
-    pub fn set_z(&mut self, value: u8) {
-        assert_eq!(value, 0);
-
-        let data = self.buffer.as_mut();
-
-        data[3] &= 0b_1000_1111;
-    }
-
-    // 4 bits
-    #[inline]
-    pub fn set_rcode(&mut self, value: ResponseCode) {
-        let data = self.buffer.as_mut();
-        let code = value.code();
-
-        data[3] |= code << 4;
+        data[2] = octets[0];
+        data[3] = octets[1];
     }
 
     #[inline]
@@ -365,16 +431,11 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> HeaderPacket<T> {
 
 impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Debug for HeaderPacket<&'a T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "HeaderPacket {{ id: {:?}, qr: {:?}, opcode: {:?}, aa: {:?}, tc: {:?}, rd: {:?}, ra: {:?}, z: {:?}, rcode: {:?}, qdcount: {:?}, ancount: {:?}, nscount: {:?}, arcount: {:?} }}",
+        write!(f, "HeaderPacket {{ id: {:?}, flags: {:?}, opcode: {:?}, rcode: {:?}, qdcount: {:?}, ancount: {:?}, nscount: {:?}, arcount: {:?} }}",
                 self.id(),
-                self.qr(),
-                self.opcode(),
-                self.aa(),
-                self.tc(),
-                self.rd(),
-                self.ra(),
-                self.z(),
-                self.rcode(),
+                self.flags(),
+                self.flags().opcode(),
+                self.flags().rcode(),
                 self.qdcount(),
                 self.ancount(),
                 self.nscount(),
@@ -385,16 +446,11 @@ impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Debug for HeaderPacket<&'a T> {
 
 impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Display for HeaderPacket<&'a T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "HeaderPacket {{ id: {}, qr: {:?}, opcode: {}, aa: {}, tc: {}, rd: {}, ra: {}, z: {}, rcode: {:?}, qdcount: {}, ancount: {}, nscount: {}, arcount: {} }}",
+        write!(f, "HeaderPacket {{ id: {}, flags: {:?}, opcode: {}, rcode: {:?}, qdcount: {}, ancount: {}, nscount: {}, arcount: {} }}",
                 self.id(),
-                self.qr(),
-                self.opcode(),
-                self.aa(),
-                self.tc(),
-                self.rd(),
-                self.ra(),
-                self.z(),
-                self.rcode(),
+                self.flags(),
+                self.flags().opcode(),
+                self.flags().rcode(),
                 self.qdcount(),
                 self.ancount(),
                 self.nscount(),
@@ -409,14 +465,7 @@ fn test_header_packet() {
 
     let mut pkt = HeaderPacket::new_unchecked(&mut buffer[..]);
     pkt.set_id(1);
-    pkt.set_qr(MessageType::Query);
-    pkt.set_opcode(OpCode::QUERY);
-    pkt.set_aa(true);
-    pkt.set_tc(true);
-    pkt.set_rd(false);
-    pkt.set_ra(true);
-    pkt.set_z(0);
-    pkt.set_rcode(ResponseCode::OK);
+    pkt.set_flags(Flags::REQUEST);
     pkt.set_qdcount(1);
     pkt.set_ancount(0);
     pkt.set_nscount(0);
@@ -425,18 +474,10 @@ fn test_header_packet() {
     let buffer = pkt.into_inner();
     let pkt = HeaderPacket::new_checked(&buffer[..]);
     assert!(pkt.is_ok());
-
+    
     let pkt = pkt.unwrap();
     assert_eq!(pkt.id(), 1);
-    assert_eq!(pkt.qr(), MessageType::Query);
-    assert_eq!(pkt.opcode(), OpCode::QUERY);
-
-    assert_eq!(pkt.aa(), true);
-    assert_eq!(pkt.tc(), true);
-    assert_eq!(pkt.rd(), false);
-    assert_eq!(pkt.ra(), true);
-    assert_eq!(pkt.z(), 0);
-    assert_eq!(pkt.rcode(), ResponseCode::OK);
+    assert_eq!(pkt.flags(), Flags::REQUEST);
     assert_eq!(pkt.qdcount(), 1);
     assert_eq!(pkt.ancount(), 0);
     assert_eq!(pkt.nscount(), 0);

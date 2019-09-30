@@ -1,8 +1,9 @@
-
+#[macro_use]
+extern crate bitflags;
+extern crate punycode;
 
 mod error;
 pub mod packet;
-
 
 pub use error::Error;
 

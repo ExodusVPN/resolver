@@ -1,7 +1,7 @@
 use crate::error::Error;
-use crate::packet::question::Labels;
-use crate::packet::question::QuestionType;
-use crate::packet::question::QuestionClass;
+// use crate::packet::question::Labels;
+use crate::packet::Kind;
+use crate::packet::Class;
 
 use std::net::{Ipv4Addr, Ipv6Addr};
 
@@ -18,17 +18,17 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 pub enum Record<'a> {
     A(Ipv4Addr),
     AAAA(Ipv6Addr),
-    CNAME(Labels<'a>),
+    CNAME(&'a str),
     TXT(&'a str),
     // 3.3.9. MX RDATA format
     // https://tools.ietf.org/html/rfc1035#section-3.3.9
     MX {
         preference: i16,
-        exchange: Labels<'a>,
+        exchange: &'a str,
     },
     // 3.3.11. NS RDATA format
     // https://tools.ietf.org/html/rfc1035#section-3.3.11
-    NS(Labels<'a>),
+    NS(&'a str),
     
     // TODO:
     // NSEC,
@@ -37,14 +37,19 @@ pub enum Record<'a> {
     // OPT(),
     // SOA(),
     // SRV,
+    Raw {
+        kind: Kind,
+        class: Class,
+        data: &'a [u8],
+    }
 }
 
 impl<'a> Record<'a> {
-    pub fn parse(kind: QuestionType,
-                 _class: QuestionClass,
+    pub fn parse(kind: Kind,
+                 _class: Class,
                  rdata: &'a [u8]) -> Result<Option<Record<'a>>, Error> {
         match kind {
-            QuestionType::A => {
+            Kind::A => {
                 if rdata.len() < 4 {
                     return Err(Error::Truncated);
                 }
@@ -56,7 +61,7 @@ impl<'a> Record<'a> {
 
                 Ok(Some(Record::A(Ipv4Addr::new(a, b, c, d))))
             },
-            QuestionType::AAAA => {
+            Kind::AAAA => {
                 if rdata.len() < 16 {
                     return Err(Error::Truncated);
                 }
@@ -66,16 +71,17 @@ impl<'a> Record<'a> {
 
                 Ok(Some(Record::AAAA(Ipv6Addr::from(octets))))
             },
-            QuestionType::CNAME => {
+            Kind::CNAME => {
                 // TODO:
                 //      1. check MAXIMUM_LABEL_SIZE
                 //      2. check MAXIMUM_NAMES_SIZE
                 //      3. check utf8
-                let labels = Labels { offset: 0, data: rdata };
-                Ok(Some(Record::CNAME(labels)))
+                // let labels = Labels { offset: 0, data: rdata };
+                // Ok(Some(Record::CNAME(labels)))
+
+                unimplemented!();
             },
             _ => Ok(None),
         }
     }
 }
-
