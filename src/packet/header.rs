@@ -209,7 +209,7 @@ impl Flags {
     // 4 bits
     /// Response code - this 4 bit field is set as part of responses.
     pub fn rcode(&self) -> ResponseCode {
-        let bits = (self.bits & 0b_0000_0000_0000_1111) as u8;
+        let bits = self.bits & 0b_0000_0000_0000_1111;
         ResponseCode::new(bits)
     }
 
