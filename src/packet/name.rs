@@ -24,9 +24,6 @@ use std::collections::HashMap;
 // 中国           --> xn--fiqs8s
 // 
 
-const NAME_POINTER_MASK: u8 = 0b_1100_0000;
-
-
 // 
 // Note that while upper and lower case letters are allowed in domain
 // names, no significance is attached to the case.  That is, two names with
@@ -36,23 +33,23 @@ const NAME_POINTER_MASK: u8 = 0b_1100_0000;
 // start with a letter, end with a letter or digit, and have as interior
 // characters only letters, digits, and hyphen.  There are also some
 // restrictions on the length.  Labels must be 63 characters or less.
-pub fn write_label<'a>(label: &str, offset: usize, packet: &mut [u8], cache: &mut HashMap<u64, u16>) -> Result<usize, Error> {
+pub fn write_label<'a>(label: &str, offset: usize, packet: &mut [u8], _cache: &mut HashMap<u64, u16>) -> Result<usize, Error> {
     if label.len() == 0 {
         return Err(Error::InvalidDomainNameLabel);
     }
 
-    let mut hasher = cache.hasher().build_hasher();
-    hasher.write(label.as_bytes());
-    let key = hasher.finish();
+    // let mut hasher = cache.hasher().build_hasher();
+    // hasher.write(label.as_bytes());
+    // let key = hasher.finish();
 
-    if let Some(pointer) = cache.get(&key) {
-        let n = 0b_1100_0000_0000_0000 | pointer;
-        let octets = n.to_be_bytes();
-        packet[offset+0] = octets[0];
-        packet[offset+1] = octets[1];
+    // if let Some(pointer) = cache.get(&key) {
+    //     let n = 0b_1100_0000_0000_0000 | pointer;
+    //     let octets = n.to_be_bytes();
+    //     packet[offset+0] = octets[0];
+    //     packet[offset+1] = octets[1];
 
-        return Ok(2);
-    }
+    //     return Ok(2);
+    // }
 
     let mut amt = 0usize;
     for byte in label.as_bytes() {
@@ -60,7 +57,7 @@ pub fn write_label<'a>(label: &str, offset: usize, packet: &mut [u8], cache: &mu
             return Err(Error::LabelSizeLimitExceeded);
         }
         match byte {
-            b'a' ..= b'z' | b'A' ..= b'Z' | b'0' ..= b'9' | b'-' => {
+            b'a' ..= b'z' | b'A' ..= b'Z' | b'0' ..= b'9' | b'-' | b'_' => {
                 packet[offset + amt + 1] = *byte;
                 amt += 1;
             },
@@ -82,7 +79,7 @@ pub fn write_label<'a>(label: &str, offset: usize, packet: &mut [u8], cache: &mu
     amt += 1;
 
     // Cache
-    cache.insert(key, offset as u16);
+    // cache.insert(key, offset as u16);
 
     Ok(amt)
 }
@@ -100,18 +97,39 @@ pub fn write_name<'a>(name: &str, offset: usize, packet: &mut [u8], cache: &mut 
     let name_start = offset;
     let mut offset = offset;
 
-    if name.len() == 0 {
+    // FIXME: 允许空字符串？
+    //        如果查询 ROOT Servers，或许在 Request 里面探测到后，直接回复固定的内容比较好(Root servers list)。
+    //        不需要有数据包的构建步骤。
+    if name.len() == 0 || name.ends_with('.') {
         return Err(Error::InvalidDomainName);
     }
 
+    let mut hasher = cache.hasher().build_hasher();
+    hasher.write(name.as_bytes());
+    let key = hasher.finish();
+
+    if let Some(pointer) = cache.get(&key) {
+        let n = 0b_1100_0000_0000_0000 | pointer;
+        let octets = n.to_be_bytes();
+        packet[offset+0] = octets[0];
+        packet[offset+1] = octets[1];
+
+        return Ok(2);
+    }
+
+    // TODO: 启用最大化的压缩？
+    //       缺点是如果数据量不多的话，其实没什么效果。
+    //       另外，也需要单独的内存分配。
+    //       
+    //       目前只做最简单的压缩处理。
     for label in name.split('.') {
         let mut is_internationalized = false;
 
-        // Check
+        // Check domain name syntax
         for ch in label.chars() {
             if ch.is_ascii() {
                 match ch {
-                    'a' ..= 'z' | 'A' ..= 'Z' | '0' ..= '9' | '-' => { },
+                    'a' ..= 'z' | 'A' ..= 'Z' | '0' ..= '9' | '-' | '_' => { },
                     _ => return Err(Error::InvalidDomainNameLabel),
                 }
             } else {
@@ -142,246 +160,130 @@ pub fn write_name<'a>(name: &str, offset: usize, packet: &mut [u8], cache: &mut 
     // NOTE: 设定 C Style 的终结符.
     packet[offset] = 0;
 
+    // Cache
+    cache.insert(key, name_start as u16);
+
     Ok(amt + 1)
 }
 
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct Label<'a> {
-    // The OFFSET field specifies an offset from the start of the message
-    offset: usize,
-    data: &'a [u8],
-}
-
-impl<'a> Label<'a> {
-    pub fn offset(&self) -> usize {
-        self.offset
-    }
-
-    pub fn bytes(&self) -> &[u8] {
-        self.data
-    }
-
-    pub fn len(&self) -> usize {
-        self.data.len()
-    }
-
-    pub fn to_str(&self) -> Result<&str, Error> {
-        std::str::from_utf8(self.data)
-            .map_err(|_| Error::InvalidUtf8Sequence)
-    }
-
-    pub fn to_str_unchecked(&self) -> &str {
-        unsafe { std::str::from_utf8_unchecked(self.data) }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Labels<'a> {
-    // The OFFSET field specifies an offset from the start of the message
-    offset: usize,
-    packet: &'a [u8],
-}
-
-impl<'a> Iterator for Labels<'a> {
-    type Item = Label<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let label_len = self.packet[self.offset];
-        if label_len & NAME_POINTER_MASK == NAME_POINTER_MASK {
-            // a pointer
-            let a = self.packet[self.offset];
-            let b = self.packet[self.offset+1];
-            let pointer = (u16::from_be_bytes([a, b]) & 0b_0011_1111_1111_1111) as usize;
-            let label_len = self.packet[pointer];
-
-            self.offset += 2;
-
-            if label_len == 0 {
-                // a sequence of labels ending with a pointer
-                return None;
-            }
-
-            let start = pointer + 1;
-            let end = start + label_len as usize;
-
-            Some(Label {
-                offset: pointer,
-                data: &self.packet[start..end],
-            })
-        } else {
-            // a sequence of labels ending in a zero octet
-            if label_len == 0 {
-                return None;
-            }
-
-            let pointer = self.offset;
-            let start = self.offset + 1;
-            let end = start + label_len as usize;
-            
-            self.offset = end;
-
-            Some(Label {
-                offset: pointer,
-                data: &self.packet[start..end],
-            })
-        }
-    }
-}
-
-
-// 4.1.4. Message compression
-// https://tools.ietf.org/html/rfc1035#section-4.1.4
-// 
-// The pointer takes the form of a two octet sequence:
-// 
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     | 1  1|                OFFSET                   |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-// 
-// The first two bits are ones.  This allows a pointer to be distinguished
-// from a label, since the label must begin with two zero bits because
-// labels are restricted to 63 octets or less.  (The 10 and 01 combinations
-// are reserved for future use.)  The OFFSET field specifies an offset from
-// the start of the message (i.e., the first octet of the ID field in the
-// domain header).  A zero offset specifies the first byte of the ID field,
-// etc.
-// 
-// The compression scheme allows a domain name in a message to be
-// represented as either:
-// 
-//    - a sequence of labels ending in a zero octet
-// 
-//    - a pointer
-// 
-//    - a sequence of labels ending with a pointer
-// 
-// Pointers can only be used for occurances of a domain name where the
-// format is not class specific.  If this were not the case, a name server
-// or resolver would be required to know the format of all RRs it handled.
-// As yet, there are no such cases, but they may occur in future RDATA
-// formats.
-// 
-// If a domain name is contained in a part of the message subject to a
-// length field (such as the RDATA section of an RR), and compression is
-// used, the length of the compressed name is used in the length
-// calculation, rather than the length of the expanded name.
-// 
-// Programs are free to avoid using pointers in messages they generate,
-// although this will reduce datagram capacity, and may cause truncation.
-// However all programs are required to understand arriving messages that
-// contain pointers.
-// 
-//    - a sequence of labels ending in a zero octet
-//    - a pointer
-//    - a sequence of labels ending with a pointer
-
-#[derive(Debug, Clone, Copy)]
-pub struct Name<'a> {
-    // The OFFSET field specifies an offset from the start of the message
-    offset: usize,
-    packet: &'a [u8],
-    len: usize,
-}
-
-impl<'a> Name<'a> {
-    pub fn offset(&self) -> usize {
-        self.offset
-    }
-
-    pub fn labels(&self) -> Labels<'a> {
-        Labels { offset: self.offset, packet: self.packet }
-    }
-
-    pub fn to_string(&self) -> Result<String, Error> {
-        let mut s = String::new();
-        for label in self.labels() {
-            s.push_str(label.to_str()?);
-            s.push('.');
-        }
-
-        if s.ends_with('.') {
-            s.pop();
-        }
-
-        Ok(s)
-    }
-
-    pub fn to_string_unchecked(&self) -> String {
-        let mut s = String::new();
-        for label in self.labels() {
-            s.push_str(label.to_str_unchecked());
-            s.push('.');
-        }
-
-        if s.ends_with('.') {
-            s.pop();
-        }
-
-        s
-    }
-
-    pub fn len(&self) -> usize {
-        self.len
-    }
-    
-    pub fn bytes(&self) -> &[u8] {
-        &self.packet[self.offset..self.offset+self.len]
-    }
-}
-
-
-pub fn read_name<'a>(packet_offset: usize, packet: &'a [u8]) -> Result<Name<'a>, Error> {
-    if packet.len() == 0 {
+pub fn read_name<'a>(packet_offset: usize, packet: &'a [u8], output: &mut String, recursion_count: u8) -> Result<usize, Error> {
+    if recursion_count > 5 {
         return Err(Error::InvalidDomainName);
     }
 
     let mut offset = packet_offset;
     loop {
+
+        if offset >= packet.len() {
+            return Err(Error::Truncated);
+        }
+
         let label_len = packet[offset];
-        if label_len & NAME_POINTER_MASK == NAME_POINTER_MASK {
-            // a pointer
-            let pointer = (u16::from_be_bytes([ packet[offset], packet[offset+1] ]) & 0b_0011_1111_1111_1111) as usize;
-            if pointer > packet.len() - 1 {
-                return Err(Error::InvalidDomainNameLabel);
-            }
+        let label_kind = label_len >> 6;
 
-            // NOTE: 会有嵌套问题吗？ (比如 packet[offset] 得到的还是一个 pointer .)
-            let label_len = packet[pointer];
-            offset += 2;
+        // DNS Label Types
+        // https://www.iana.org/assignments/dns-parameters/dns-parameters.xhtml#dns-parameters-10
+        match label_kind {
+            0b00 => {
+                // Normal label lower 6 bits is the length of the label    Standard    [RFC1035]
+                // a sequence of labels ending in a zero octet
+                // or
+                // a sequence of labels ending with a pointer
+                if label_len == 0 {
+                    offset += 1;
+                    break;
+                }
 
-            // if label_len == 0 {
-            //     // a sequence of labels ending with a pointer
-            //     break;
-            // }
+                if label_len as usize > MAXIMUM_LABEL_SIZE {
+                    return Err(Error::LabelSizeLimitExceeded);
+                }
 
-            if label_len as usize > MAXIMUM_LABEL_SIZE {
-                return Err(Error::LabelSizeLimitExceeded);
-            }
+                let start = offset + 1;
+                let end = start + label_len as usize;
+                
+                if end >= packet.len() {
+                    return Err(Error::Truncated);
+                }
 
-            // break;
-            let len = 2;
-            return Ok(Name { offset: pointer as usize, packet, len });
-            // return read_name(pointer as usize, packet);
+                let data = &packet[start..end];
+                let s = std::str::from_utf8(data)
+                    .map_err(|_| Error::InvalidUtf8Sequence)?;
 
-        } else {
-            // a sequence of labels ending in a zero octet
-            if label_len == 0 {
-                offset += 1;
-                break;
-            }
+                // Check domain name syntax
+                for ch in s.as_bytes() {
+                    match ch {
+                        b'a' ..= b'z' | b'A' ..= b'Z' | b'0' ..= b'9' | b'-' | b'_' => { },
+                        _ => {
+                            // Format Error
+                            return Err(Error::InvalidDomainName);
+                        }
+                    }
+                }
 
-            if label_len as usize > MAXIMUM_LABEL_SIZE {
-                return Err(Error::LabelSizeLimitExceeded);
-            }
+                output.push_str(s);
+                output.push('.');
 
-            offset += 1 + label_len as usize;
+                offset = end;
+            },
+            0b11 => {
+                // Compressed label the lower 6 bits and the 8 bits from next octet form a pointer to the compression target.
+                // Standard    [RFC1035]
+                let index = u16::from_be_bytes([ label_len << 2, packet[offset+1] ]) as usize;
+                
+                if index >= packet.len() {
+                    return Err(Error::InvalidDomainNameLabel);
+                }
+
+                let _amt = read_name(index as usize, packet, output, recursion_count + 1)?;
+                if offset == packet_offset {
+                    // a pointer
+                    let amt = 2usize;
+                    return Ok(amt);
+                } else {
+                    // a sequence of labels ending with a pointer
+                    let amt = offset - packet_offset;
+                    return Ok(amt)
+                }
+            },
+            0b01 => {
+                // Extended label type the lower 6 bits of this type (section 3) indicate the type of label in use
+                // Proposed  [RFC6891]
+                // 
+                // WARN: deprecated by RFC6891
+                // 
+                // 5.  Extended Label Types
+                // https://tools.ietf.org/html/rfc6891#section-5
+                let ext_label_kind = label_len << 2;
+                match ext_label_kind {
+                    0b00_0001 => {
+                        // Binary Label     Historic    [RFC3364] [RFC3363] [RFC2673] [RFC6891]
+                        return Err(Error::InvalidExtLabelKind);
+                    },
+                    0b11_1111 => {
+                        // https://tools.ietf.org/html/rfc2671#section-3.2
+                        // Reserved for future expansion.   Proposed    [RFC6891]
+                        return Err(Error::InvalidExtLabelKind);
+                    },
+                    _ => {
+                        return Err(Error::InvalidExtLabelKind);
+                    },
+                }
+            },
+            0b10 => {
+                // Unallocated
+                return Err(Error::InvalidLabelKind);
+            },
+            _ => unreachable!(),
         }
     }
 
-    let len = offset - packet_offset;
+    let amt = offset - packet_offset;
 
-    Ok(Name { offset: packet_offset, packet, len })
+    if output.ends_with('.') {
+        output.pop();
+    }
+
+    return Ok(amt);
 }
 
 
@@ -394,18 +296,22 @@ fn test_name() {
     let packet = &mut buffer[..];
 
     let amt = write_name("www.中国", offset, packet, &mut cache).unwrap();
-    let amt2 = write_name("www.hi.中国", offset + amt, packet, &mut cache).unwrap();
+    let amt2 = write_name("www.中国", offset + amt, packet, &mut cache).unwrap();
     assert_eq!(amt, 16);
-    assert_eq!(amt2, 8);
+    assert_eq!(amt2, 2);
     assert_eq!(&packet[..offset+amt+amt2], &[
         0, 0,
         3, 119, 119, 119, 10, 120, 110, 45, 45, 102, 105, 113, 115, 56, 115, 0,
-        192, 2, 2, 104, 105, 192, 6, 0,
+        192, 2,
     ]);
 
-    let name1 = read_name(offset, packet).unwrap();
-    let name2 = read_name(offset+amt, packet).unwrap();
+    let mut qname = String::new();
+    let name1_amt = read_name(offset, packet, &mut qname, 0).unwrap();
+    assert_eq!(name1_amt, amt);
+    assert_eq!(qname, "www.xn--fiqs8s");
 
-    assert_eq!(name1.to_string(), Ok("www.xn--fiqs8s".to_string()));
-    assert_eq!(name2.to_string(), Ok("www.hi.xn--fiqs8s".to_string()));
+    qname.clear();
+    let name2_amt = read_name(offset+amt, packet, &mut qname, 0).unwrap();
+    assert_eq!(name2_amt, amt2);
+    assert_eq!(qname, "www.xn--fiqs8s");
 }

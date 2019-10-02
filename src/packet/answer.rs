@@ -128,8 +128,11 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
             data[4], data[5],
             data[6], data[7],
         ]);
-
-        if num > std::i32::MAX as u32 { 0 } else { num }
+        
+        // FIXME: 需要兼容很旧的版本？
+        // if num > std::i32::MAX as u32 { 0 } else { num }
+        
+        num
     }
 
     /// an unsigned 16 bit integer that specifies the length in octets of the RDATA field.
@@ -142,7 +145,7 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
 
     #[inline]
     pub fn len(&self) -> usize {
-        10 + self.rdlen() as usize
+        10
     }
 }
 

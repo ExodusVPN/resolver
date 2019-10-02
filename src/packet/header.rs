@@ -160,14 +160,48 @@ impl Flags {
         (self.bits & 0b_0000_0000_1000_0000) >> 7 == 1
     }
 
+    // 1 bits
+    // https://tools.ietf.org/html/rfc3225#section-3
+    // 
+    // explicit notification of the ability of
+    // the client to accept (if not understand) DNSSEC security RRs.
+    // 
+    // https://tools.ietf.org/html/rfc4035#section-4.9.1
+    // 
+    // A validating security-aware stub resolver MUST set the DO bit,
+    // because otherwise it will not receive the DNSSEC RRs it needs to
+    // perform signature validation.
     pub fn do_(&self) -> bool {
         (self.bits & 0b_0000_0000_0100_0000) >> 6 == 1
     }
 
+    // 1 bits
+    // https://tools.ietf.org/html/rfc3655#section-2
+    // 
+    // If the CD bit is set, the server will not perform checking, 
+    // but SHOULD still set the AD bit if the data has already been cryptographically verified or
+    // complies with local policy.  The AD bit MUST only be set if DNSSEC
+    // records have been requested via the DO bit RFC3225 and relevant SIG
+    // records are returned.
+    // 
+    // https://tools.ietf.org/html/rfc4035#section-4.9.3
+    // 
+    // A validating security-aware stub resolver SHOULD NOT examine the
+    // setting of the AD bit in response messages, as, by definition, the
+    // stub resolver performs its own signature validation regardless of the
+    // setting of the AD bit.
     pub fn ad(&self) -> bool {
         (self.bits & 0b_0000_0000_0010_0000) >> 5 == 1
     }
 
+    // 1 bits
+    // https://tools.ietf.org/html/rfc4035#section-4.9.2
+    // 
+    // A validating security-aware stub resolver SHOULD set the CD bit
+    // because otherwise the security-aware recursive name server will
+    // answer the query using the name server's local policy, which may
+    // prevent the stub resolver from receiving data that would be
+    // acceptable to the stub resolver's local policy.
     pub fn cd(&self) -> bool {
         (self.bits & 0b_0000_0000_0001_0000) >> 4 == 1
     }
@@ -225,7 +259,7 @@ impl Flags {
         }
     }
 
-    pub fn set_do_(&mut self, value: bool) {
+    pub fn set_do(&mut self, value: bool) {
         if value {
             self.bits |= 0b_0000_0000_0100_0000;
         } else {

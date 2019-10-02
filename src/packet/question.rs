@@ -85,6 +85,11 @@ impl<T: AsRef<[u8]>> QuestionPacket<T> {
 
         Class(u16::from_be_bytes([ data[2], data[3] ]))
     }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        Self::SIZE
+    }
 }
 
 impl<'a, T: AsRef<[u8]> + ?Sized> QuestionPacket<&'a T> {

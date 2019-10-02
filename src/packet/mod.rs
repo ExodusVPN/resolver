@@ -1,15 +1,16 @@
 
+mod name;
 mod header;
 mod question;
 mod answer;
 mod record;
-mod name;
 
+
+pub use self::name::*;
 pub use self::header::*;
 pub use self::question::*;
 pub use self::answer::*;
 pub use self::record::*;
-pub use self::name::*;
 
 
 // 4. MESSAGES
@@ -614,7 +615,7 @@ impl ResponseCode {
     pub const NXRRSET: Self  = Self(8);
     /// NotAuth     Server Not Authoritative for zone   RFC2136
     /// NotAuth     Not Authorized  RFC2845
-    pub const NOT_AUTH: Self = Self(9);
+    pub const NOT_AUTH: Self = Self(9); 
     /// NotZone     Name not contained in zone  RFC2136
     pub const NOT_ZONE: Self = Self(10);
 
