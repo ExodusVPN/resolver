@@ -241,7 +241,7 @@ pub fn read_name<'a>(packet_offset: usize, packet: &'a [u8], output: &mut String
                     return Ok(amt);
                 } else {
                     // a sequence of labels ending with a pointer
-                    let amt = offset - packet_offset;
+                    let amt = offset + 2 - packet_offset;
                     return Ok(amt)
                 }
             },

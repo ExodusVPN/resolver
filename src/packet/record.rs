@@ -1,9 +1,42 @@
 use crate::error::Error;
+
 use crate::packet::Kind;
 use crate::packet::Class;
+use crate::packet::Flags;
 use crate::packet::read_name;
 
 use std::net::{Ipv4Addr, Ipv6Addr};
+
+
+pub struct Question {
+    pub name: String,
+    pub kind: Kind,
+    pub class: Class,
+}
+
+pub struct Answer<'a> {
+    pub name: String,
+    pub kind: Kind,
+    pub class: Class,
+    pub ttl: u32,
+    pub value: Record<'a>
+}
+
+
+pub struct Request {
+    pub id: u16,
+    pub flags: Flags,
+    pub questions: Vec<Question>,
+}
+
+pub struct Response<'a> {
+    pub id: u16,
+    pub flags: Flags,
+    pub questions: Vec<Question>,
+    pub answers: Vec<Answer<'a>>,
+    pub authorities: Vec<Answer<'a>>,
+    pub additionals: Vec<Answer<'a>>,
+}
 
 
 // 3.3. Standard RRs
@@ -19,6 +52,18 @@ pub enum Record<'a> {
     A(Ipv4Addr),
     AAAA(Ipv6Addr),
     CNAME(String),
+    // DNAME Redirection in the DNS
+    // https://tools.ietf.org/html/rfc6672
+    DNAME(String),
+    // 4.2.  Answer with a Synthesized HINFO RRset
+    // https://tools.ietf.org/html/rfc8482#section-4.2
+    // 
+    // Note: 当客户端发起 Class=ANY 的查询时，必须要要返回该 Record.
+    //       
+    HINFO {
+        cpu: String,        // The CPU field of the HINFO RDATA SHOULD be set to "RFC8482".
+        os: Option<String>, // The OS field of the HINFO RDATA SHOULD be set to the null string to minimize the size of the response.
+    },
     // https://tools.ietf.org/html/rfc1035#section-3.3.14
     // 
     // Using the Domain Name System To Store Arbitrary String Attributes
@@ -39,16 +84,29 @@ pub enum Record<'a> {
     PTR(String),
 
     // TODO:
-    // NSEC,
     // https://tools.ietf.org/html/rfc4034
+    // RRSIG,
     // DNSKEY(),
-    
+    // DS,
+    // NSEC,
+    // NSEC3
+    // DLV,
+    // KEY,
+    // KX,
+    // CDNSKEY
+    // CDS
+    // 
+
     // 6.1.  OPT Record Definition
     // https://tools.ietf.org/html/rfc6891#section-6.1
     // 
     // DNS EDNS0 Option Codes (OPT)
     // https://www.iana.org/assignments/dns-parameters/dns-parameters.xhtml#dns-parameters-11
+    // 
+    // https://tools.ietf.org/html/rfc3225#section-3
     OPT {
+        // EXTENDED-RCODE
+        // ext_rcode: u8,
         code: u16,
         length: u16,
         data: &'a [u8],
@@ -107,6 +165,18 @@ impl<'a> Record<'a> {
                 let _amt = read_name(offset, packet, &mut cname, 0)?;
 
                 Ok(Record::CNAME(cname))
+            },
+            Kind::HINFO => {
+                // TEST: cargo run --example dig ns3.cloudflare.com:53 cloudflare.com
+                const DEFAULT_HINFO: &[u8] = &[7, 82, 70, 67, 56, 52, 56, 50, 0]; // RFC8482
+                if rdata != DEFAULT_HINFO {
+                    return Err(Error::InvalidHinfoRecord);
+                }
+
+                let mut cpu = String::new();
+                let _amt = read_name(offset, packet, &mut cpu, 0)?;
+
+                Ok(Record::HINFO { cpu, os: None } )
             },
             Kind::PTR => {
                 let mut cname = String::new();

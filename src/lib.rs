@@ -23,6 +23,8 @@ pub use error::Error;
 // 
 // UDP messages    512 octets or less
 // 
+// https://tools.ietf.org/html/rfc2671#section-4.5
+// 
 
 // Maximum
 /// 63 octets or less

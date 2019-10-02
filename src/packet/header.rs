@@ -284,7 +284,7 @@ impl Flags {
     }
 
     pub fn set_rcode(&mut self, value: ResponseCode) {
-        let code = value.code() as u16;
+        let code = value.code() << 8;
         self.bits &= 0b_1111_1111_1111_0000;
         self.bits |= code;
     }

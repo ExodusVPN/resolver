@@ -87,7 +87,8 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
             return Err(Error::Truncated);
         }
 
-        if data.len() < min_size + self.rdlen() as usize {
+        let min_size = min_size + self.rdlen() as usize;
+        if data.len() < min_size {
             return Err(Error::Truncated);
         }
 
@@ -123,15 +124,23 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
     /// transaction in progress, and should not be cached.
     #[inline]
     pub fn ttl(&self) -> u32 {
+        // NOTE: EXTENDED-RCODE
+        // 
+        // 6.1.3.  OPT Record TTL Field Use
+        // https://tools.ietf.org/html/rfc6891#section-6.1.3
+        // 
+        // 4.6. The extended RCODE and flags (which OPT stores in the RR TTL field) are structured as follows
+        // https://tools.ietf.org/html/rfc2671#section-4.6
+        // 
         let data = self.buffer.as_ref();
         let num = u32::from_be_bytes([
             data[4], data[5],
             data[6], data[7],
         ]);
-        
+
         // FIXME: 需要兼容很旧的版本？
         // if num > std::i32::MAX as u32 { 0 } else { num }
-        
+
         num
     }
 

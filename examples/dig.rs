@@ -55,16 +55,18 @@ fn main() -> Result<(), io::Error> {
 }
 
 fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
-    let mut buffer = [0u8; 2048];
+    let mut buffer = [0u8; 64*1024];
     let mut qname = String::new();
     let mut cache: HashMap<u64, u16> = HashMap::new();
 
     let mut pkt = packet::HeaderPacket::new_unchecked(&mut buffer[..]);
     pkt.set_id(1);
 
-    let mut flags = packet::Flags::REQUEST;
-    // let mut flags = packet::Flags::RECURSION_REQUEST;
+    // let mut flags = packet::Flags::REQUEST;
+    let mut flags = packet::Flags::RECURSION_REQUEST;
     flags.set_do(true);
+    // flags.set_ad(true);
+    // flags.set_cd(true);
 
     println!("flags: {:?}", flags);
 
@@ -72,10 +74,9 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
     pkt.set_qdcount(1);
     pkt.set_ancount(0);
     pkt.set_nscount(0);
-    pkt.set_arcount(0);
+    pkt.set_arcount(1);
     
     let header_size = packet::HeaderPacket::<&[u8]>::HEADER_SIZE;
-    // let ques_size   = packet::QuestionPacket::<&[u8]>::SIZE;
 
     let mut offset = pkt.len();
     
@@ -88,6 +89,40 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
 
     offset += pkt.len();
 
+    // DNSSEC
+    // let amt = packet::write_name(name, offset, &mut buffer, &mut cache)?;
+    buffer[offset] = 0;
+
+    offset += 1;
+    let mut pkt = packet::AnswerPacket::new_unchecked(&mut buffer[offset..]);
+    //           ext_rcode    version  do  z
+    let ttl = 0b_0000_0000___0000_0000_1___000_0000_0000_0000u32;
+    pkt.set_atype(packet::Kind::OPT);
+    pkt.set_aclass(packet::Class(std::u16::MAX)); // requestor's UDP payload size
+    pkt.set_ttl(ttl);  // extended RCODE and flags
+    pkt.set_rdlen(4);
+    let rdata = pkt.rdata_mut();
+    rdata[0] = 0;
+    rdata[1] = 0;
+    rdata[2] = 0;
+    rdata[3] = 0;
+
+    offset += pkt.len() + 4;
+    // Option record
+    // DNS EDNS0 Option Codes (OPT)
+    // https://www.iana.org/assignments/dns-parameters/dns-parameters.xhtml#dns-parameters-11
+    // 
+    // 8  edns-client-subnet
+    // 9  EDNS EXPIRE
+    // 11 edns-tcp-keepalive
+    // 14 edns-key-tag
+    // 16 EDNS-Client-Tag
+    // 17 EDNS-Server-Tag
+    // 
+    // Client Subnet in DNS Queries
+    // https://tools.ietf.org/html/rfc7871#page-8
+    // 
+
     println!("Send Packet:");
     println!("Header Packet: {}", packet::HeaderPacket::new_checked(&buffer[..header_size])?);
 
@@ -98,7 +133,7 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
     assert!(offset <= std::u16::MAX as usize);
     conn.write_all(&(offset as u16).to_be_bytes()).unwrap();
 
-    println!("send bytes: {:?}", &buffer[..offset]);
+    println!("send message: {:?}", &buffer[..offset]);
     conn.write_all(&buffer[..offset]).unwrap();
 
     println!();
@@ -108,12 +143,13 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
 
     let amt = conn.read(&mut buffer).unwrap();
     println!("recv {:?} bytes from name server.", amt);
-    println!("message body: {:?}", &buffer[header_size..amt]);
+    
 
     let buffer = &buffer[..amt];
-    println!("{:?}", &buffer);
+    // println!("message: {:?}", &buffer);
 
     let hdr = packet::HeaderPacket::new_checked(&buffer[..])?;
+    // println!("message body: {:?}", &buffer[header_size..amt]);
     let qdcount = hdr.qdcount() as usize;
     let ancount = hdr.ancount() as usize;
     let nscount = hdr.nscount() as usize;
@@ -173,6 +209,7 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
         let ttl   = pkt.ttl();
         let rdlen = pkt.rdlen();
         let rdata = pkt.rdata();
+
         let record = packet::Record::parse(offset, &buffer, kind, class, rdata)?;
         println!("Authority Records Section: QNAME={:?} ATYPE={} ACLASS={} TTL={} RDATA={:?}",
                 qname,
@@ -181,7 +218,6 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
                 ttl,
                 record,
                 );
-
         offset += rdlen as usize;
     }
     
@@ -206,7 +242,6 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
                 ttl,
                 record,
                 );
-        
         offset += rdlen as usize;
     }
 

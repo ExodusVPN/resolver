@@ -13,6 +13,10 @@ pub use self::answer::*;
 pub use self::record::*;
 
 
+// EDNS0
+pub const DNS_EXTENSION_VERSION: u8 = 0;
+
+
 // 4. MESSAGES
 // 4.1. Format
 // https://tools.ietf.org/html/rfc1035#section-4
