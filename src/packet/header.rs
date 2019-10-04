@@ -19,7 +19,7 @@ bitflags! {
         const OP_UPDATE   = 0b_0010_1000_0000_0000; /// Update                           RFC2136
         const OP_DSO      = 0b_0011_0000_0000_0000; /// DNS Stateful Operations (DSO)    RFC8490
         // OpCode   7-15    Unassigned
-
+        
         const AA          = 0b_0000_0100_0000_0000; // Authoritative Answer
         const TC          = 0b_0000_0010_0000_0000; // TrunCation
         const RD          = 0b_0000_0001_0000_0000; // Recursion Desired
@@ -35,7 +35,8 @@ bitflags! {
         // A validating security-aware stub resolver MUST set the DO bit,
         // because otherwise it will not receive the DNSSEC RRs it needs to
         // perform signature validation.
-        const DO          = 0b_0000_0000_0100_0000;
+        // const DO          = 0b_0000_0000_0100_0000;
+        
         // https://tools.ietf.org/html/rfc3655#section-2
         // 
         // If the CD bit is set, the server will not perform checking, 
@@ -171,9 +172,9 @@ impl Flags {
     // A validating security-aware stub resolver MUST set the DO bit,
     // because otherwise it will not receive the DNSSEC RRs it needs to
     // perform signature validation.
-    pub fn do_(&self) -> bool {
-        (self.bits & 0b_0000_0000_0100_0000) >> 6 == 1
-    }
+    // pub fn do_(&self) -> bool {
+    //     (self.bits & 0b_0000_0000_0100_0000) >> 6 == 1
+    // }
 
     // 1 bits
     // https://tools.ietf.org/html/rfc3655#section-2
@@ -259,13 +260,13 @@ impl Flags {
         }
     }
 
-    pub fn set_do(&mut self, value: bool) {
-        if value {
-            self.bits |= 0b_0000_0000_0100_0000;
-        } else {
-            self.bits &= 0b_1111_1111_1011_1111;
-        }
-    }
+    // pub fn set_do(&mut self, value: bool) {
+    //     if value {
+    //         self.bits |= 0b_0000_0000_0100_0000;
+    //     } else {
+    //         self.bits &= 0b_1111_1111_1011_1111;
+    //     }
+    // }
 
     pub fn set_ad(&mut self, value: bool) {
         if value {

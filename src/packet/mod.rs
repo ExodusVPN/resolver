@@ -4,18 +4,14 @@ mod header;
 mod question;
 mod answer;
 mod record;
-
+mod extension;
 
 pub use self::name::*;
 pub use self::header::*;
 pub use self::question::*;
 pub use self::answer::*;
 pub use self::record::*;
-
-
-// EDNS0
-pub const DNS_EXTENSION_VERSION: u8 = 0;
-
+pub use self::extension::*;
 
 // 4. MESSAGES
 // 4.1. Format
@@ -239,7 +235,7 @@ impl Kind {
         // Unassigned   64-98
         // Unassigned   110-248
         // Unassigned   261-32767
-        // Unassigned  32770-65279
+        // Unassigned   32770-65279
         match self.0 {
             54 | 64 ..= 98 | 110 ..= 248 | 261 ..= 32767 | 32770 ..= 65279 => true,
             _ => false,
@@ -518,10 +514,10 @@ impl OpCode {
     // 5   Update  [RFC2136]
     // 6   DNS Stateful Operations (DSO)   [RFC8490]
     // 7-15    Unassigned  
-
+    
     /// a standard query (QUERY)
     pub const QUERY: Self  = Self(0);
-    /// an inverse query (IQUERY)
+    /// an inverse query (IQUERY), obsoleted
     pub const IQUERY: Self = Self(1);
     /// a server status request (STATUS)
     pub const STATUS: Self = Self(2);
@@ -535,6 +531,7 @@ impl OpCode {
 
     pub const MAX: Self    = Self(15);
 
+    #[inline]
     pub fn new(code: u8) -> Self {
         assert!(code < 16);
         Self(code)
@@ -607,7 +604,7 @@ impl std::fmt::Display for OpCode {
 // 65535   Reserved, can be allocated by Standards Action      [RFC6895]
 // 
 
-// 4 Bits + 8 Bits
+// 8 Bits + 4 Bits
 /// Response code - this 4 bit field is set as part of responses.
 #[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub struct ResponseCode(u16);
@@ -638,7 +635,6 @@ impl ResponseCode {
     /// to the particular requester, or a name server may not wish to perform
     /// a particular operation (e.g., zone transfer) for particular data.
     pub const QUERY_REFUSED: Self       = Self(5);
-
 
     /// YXDomain    Name Exists when it should not  RFC2136 RFC6672
     pub const YXDOMAIN: Self = Self(6);
@@ -675,6 +671,8 @@ impl ResponseCode {
     /// BADCOOKIE   Bad/missing Server Cookie   RFC7873
     pub const BADCOOKIE: Self = Self(23);
 
+
+    #[inline]
     pub fn new(code: u16) -> Self {
         assert!(code < 4095); // 2**12 - 1
         Self(code)

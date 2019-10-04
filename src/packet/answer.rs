@@ -2,6 +2,7 @@ use crate::error::Error;
 use crate::packet::Kind;
 use crate::packet::Class;
 
+
 // 4.1.3. Resource record format
 // https://tools.ietf.org/html/rfc1035#section-4.1.3
 // 
@@ -81,14 +82,13 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
     #[inline]
     pub fn check_len(&self) -> Result<(), Error> {
         let data = self.buffer.as_ref();
-        let min_size = 10;
+        let min_size = self.header_len();
         
         if data.len() < min_size {
             return Err(Error::Truncated);
         }
 
-        let min_size = min_size + self.rdlen() as usize;
-        if data.len() < min_size {
+        if data.len() < self.total_len() {
             return Err(Error::Truncated);
         }
 
@@ -103,7 +103,7 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
     /// two octets containing one of the RR type codes.
     /// This field specifies the meaning of the data in the RDATA field.
     #[inline]
-    pub fn atype(&self) -> Kind {
+    pub fn kind(&self) -> Kind {
         let data = self.buffer.as_ref();
 
         Kind(u16::from_be_bytes([ data[0], data[1] ]))
@@ -111,7 +111,7 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
 
     /// two octets which specify the class of the data in the RDATA field.
     #[inline]
-    pub fn aclass(&self) -> Class {
+    pub fn class(&self) -> Class {
         let data = self.buffer.as_ref();
         let num = u16::from_be_bytes([ data[2], data[3] ]);
 
@@ -124,22 +124,11 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
     /// transaction in progress, and should not be cached.
     #[inline]
     pub fn ttl(&self) -> u32 {
-        // NOTE: EXTENDED-RCODE
-        // 
-        // 6.1.3.  OPT Record TTL Field Use
-        // https://tools.ietf.org/html/rfc6891#section-6.1.3
-        // 
-        // 4.6. The extended RCODE and flags (which OPT stores in the RR TTL field) are structured as follows
-        // https://tools.ietf.org/html/rfc2671#section-4.6
-        // 
         let data = self.buffer.as_ref();
         let num = u32::from_be_bytes([
             data[4], data[5],
             data[6], data[7],
         ]);
-
-        // FIXME: 需要兼容很旧的版本？
-        // if num > std::i32::MAX as u32 { 0 } else { num }
 
         num
     }
@@ -153,8 +142,13 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
     }
 
     #[inline]
-    pub fn len(&self) -> usize {
+    pub fn header_len(&self) -> usize {
         10
+    }
+
+    #[inline]
+    pub fn total_len(&self) -> usize {
+        10 + self.rdlen() as usize
     }
 }
 
@@ -164,12 +158,12 @@ impl<'a, T: AsRef<[u8]> + ?Sized> AnswerPacket<&'a T> {
     pub fn rdata(&self) -> &'a [u8] {
         let data = self.buffer.as_ref();
 
-        &data[10..10 + self.rdlen() as usize]
+        &data[self.header_len()..self.total_len()]
     }
 
     #[inline]
     pub fn payload(&self) -> &'a [u8] {
-        let offset = 10 + self.rdlen() as usize;
+        let offset = self.total_len();
         let data = self.buffer.as_ref();
 
         &data[offset..]
@@ -178,7 +172,7 @@ impl<'a, T: AsRef<[u8]> + ?Sized> AnswerPacket<&'a T> {
 
 impl<T: AsRef<[u8]> + AsMut<[u8]>> AnswerPacket<T> {
     #[inline]
-    pub fn set_atype(&mut self, value: Kind) {
+    pub fn set_kind(&mut self, value: Kind) {
         let data = self.buffer.as_mut();
         let octets = value.0.to_be_bytes();
 
@@ -187,7 +181,7 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> AnswerPacket<T> {
     }
 
     #[inline]
-    pub fn set_aclass(&mut self, value: Class) {
+    pub fn set_class(&mut self, value: Class) {
         let data = self.buffer.as_mut();
         let octets = value.0.to_be_bytes();
 
@@ -218,26 +212,28 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> AnswerPacket<T> {
 
     #[inline]
     pub fn rdata_mut(&mut self) -> &mut [u8] {
-        let offset = 10 + self.rdlen() as usize;
+        let start = self.header_len();
+        let end = self.total_len();
+
         let data = self.buffer.as_mut();
 
-        &mut data[10..offset]
+        &mut data[start..end]
     }
 
     #[inline]
     pub fn payload_mut(&mut self) -> &mut [u8]{
-        let offset = 10 + self.rdlen() as usize;
+        let total_len = self.total_len();
         let data = self.buffer.as_mut();
         
-        &mut data[offset..]
+        &mut data[total_len..]
     }
 }
 
 impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Debug for AnswerPacket<&'a T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "AnswerPacket {{ atype: {:?}, aclass: {:?}, ttl: {:?}, rdlen: {:?}, rdata: {:?} }}",
-                self.atype(),
-                self.aclass(),
+        write!(f, "AnswerPacket {{ kind: {:?}, class: {:?}, ttl: {:?}, rdlen: {:?}, rdata: {:?} }}",
+                self.kind(),
+                self.class(),
                 self.ttl(),
                 self.rdlen(),
                 self.rdata(),
@@ -247,9 +243,9 @@ impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Debug for AnswerPacket<&'a T> {
 
 impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Display for AnswerPacket<&'a T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "AnswerPacket {{ atype: {}, aclass: {}, ttl: {}, rdlen: {}, rdata: {:?} }}",
-                self.atype(),
-                self.aclass(),
+        write!(f, "AnswerPacket {{ kind: {}, class: {}, ttl: {}, rdlen: {}, rdata: {:?} }}",
+                self.kind(),
+                self.class(),
                 self.ttl(),
                 self.rdlen(),
                 self.rdata(),

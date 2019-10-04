@@ -73,14 +73,14 @@ impl<T: AsRef<[u8]>> QuestionPacket<T> {
     }
 
     #[inline]
-    pub fn qtype(&self) -> Kind {
+    pub fn kind(&self) -> Kind {
         let data = self.buffer.as_ref();
 
         Kind(u16::from_be_bytes([ data[0], data[1] ]))
     }
 
     #[inline]
-    pub fn qclass(&self) -> Class {
+    pub fn class(&self) -> Class {
         let data = self.buffer.as_ref();
 
         Class(u16::from_be_bytes([ data[2], data[3] ]))
@@ -103,7 +103,7 @@ impl<'a, T: AsRef<[u8]> + ?Sized> QuestionPacket<&'a T> {
 
 impl<T: AsRef<[u8]> + AsMut<[u8]>> QuestionPacket<T> {
     #[inline]
-    pub fn set_qtype(&mut self, value: Kind) {
+    pub fn set_kind(&mut self, value: Kind) {
         let data = self.buffer.as_mut();
         let octets = value.0.to_be_bytes();
 
@@ -112,7 +112,7 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> QuestionPacket<T> {
     }
 
     #[inline]
-    pub fn set_qclass(&mut self, value: Class) {
+    pub fn set_class(&mut self, value: Class) {
         let data = self.buffer.as_mut();
         let octets = value.0.to_be_bytes();
 
@@ -130,18 +130,18 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> QuestionPacket<T> {
 
 impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Debug for QuestionPacket<&'a T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "QuestionPacket {{ qtype: {:?}, qclass: {:?} }}",
-                self.qtype(),
-                self.qclass(),
+        write!(f, "QuestionPacket {{ kind: {:?}, class: {:?} }}",
+                self.kind(),
+                self.class(),
         )
     }
 }
 
 impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Display for QuestionPacket<&'a T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "QuestionPacket {{ qtype: {}, qclass: {} }}",
-                self.qtype(),
-                self.qclass(),
+        write!(f, "QuestionPacket {{ kind: {}, class: {} }}",
+                self.kind(),
+                self.class(),
         )
     }
 }
@@ -152,15 +152,15 @@ fn test_question_packet() {
     let mut buffer = [0u8; 1024];
 
     let mut pkt = QuestionPacket::new_unchecked(&mut buffer[..]);
-    pkt.set_qtype(Kind(111));
-    pkt.set_qclass(Class(222));
+    pkt.set_kind(Kind(111));
+    pkt.set_class(Class(222));
 
     let buffer = pkt.into_inner();
     let pkt = QuestionPacket::new_checked(&buffer[..]);
     assert!(pkt.is_ok());
 
     let pkt = pkt.unwrap();
-    assert_eq!(pkt.qtype(), Kind(111));
-    assert_eq!(pkt.qclass(), Class(222));
+    assert_eq!(pkt.kind(), Kind(111));
+    assert_eq!(pkt.class(), Class(222));
 }
 

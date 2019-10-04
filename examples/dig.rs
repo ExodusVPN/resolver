@@ -63,8 +63,8 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
     pkt.set_id(1);
 
     // let mut flags = packet::Flags::REQUEST;
-    let mut flags = packet::Flags::RECURSION_REQUEST;
-    flags.set_do(true);
+    let flags = packet::Flags::RECURSION_REQUEST;
+    // flags.set_do(true);
     // flags.set_ad(true);
     // flags.set_cd(true);
 
@@ -84,8 +84,8 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
     offset += amt;
 
     let mut pkt = packet::QuestionPacket::new_unchecked(&mut buffer[offset..]);
-    pkt.set_qtype(packet::Kind::A);
-    pkt.set_qclass(packet::Class::IN);
+    pkt.set_kind(packet::Kind::A);
+    pkt.set_class(packet::Class::IN);
 
     offset += pkt.len();
 
@@ -97,8 +97,8 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
     let mut pkt = packet::AnswerPacket::new_unchecked(&mut buffer[offset..]);
     //           ext_rcode    version  do  z
     let ttl = 0b_0000_0000___0000_0000_1___000_0000_0000_0000u32;
-    pkt.set_atype(packet::Kind::OPT);
-    pkt.set_aclass(packet::Class(std::u16::MAX)); // requestor's UDP payload size
+    pkt.set_kind(packet::Kind::OPT);
+    pkt.set_class(packet::Class(std::u16::MAX)); // requestor's UDP payload size
     pkt.set_ttl(ttl);  // extended RCODE and flags
     pkt.set_rdlen(4);
     let rdata = pkt.rdata_mut();
@@ -107,7 +107,7 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
     rdata[2] = 0;
     rdata[3] = 0;
 
-    offset += pkt.len() + 4;
+    offset += pkt.header_len() + 4;
     // Option record
     // DNS EDNS0 Option Codes (OPT)
     // https://www.iana.org/assignments/dns-parameters/dns-parameters.xhtml#dns-parameters-11
@@ -128,7 +128,7 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
 
     let pkt = packet::QuestionPacket::new_checked(&buffer[header_size + amt..offset])?;
     let _amt = packet::read_name(header_size, &buffer, &mut qname, 0)?;
-    println!("Question Packet: QNAME={:?} QTYPE={} QCLASS={}", qname.to_string(), pkt.qtype(), pkt.qclass());
+    println!("Question Packet: QNAME={:?} QTYPE={} QCLASS={}", qname.to_string(), pkt.kind(), pkt.class());
 
     assert!(offset <= std::u16::MAX as usize);
     conn.write_all(&(offset as u16).to_be_bytes()).unwrap();
@@ -167,21 +167,19 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
         let pkt = packet::QuestionPacket::new_checked(&buffer[offset..])?;
         offset += pkt.len();
 
-        println!("Question Section: QNAME={:?} QTYPE={} QCLASS={}", qname.to_string(), pkt.qtype(), pkt.qclass());
+        println!("Question Section: QNAME={:?} QTYPE={} QCLASS={}", qname.to_string(), pkt.kind(), pkt.class());
     }
     
-
-
     for _ in 0..ancount {
         qname.clear();
         let amt = packet::read_name(offset, &buffer, &mut qname, 0)?;
         offset += amt;
 
         let pkt = packet::AnswerPacket::new_checked(&buffer[offset..])?;
-        offset += pkt.len();
+        offset += pkt.header_len();
 
-        let kind  = pkt.atype();
-        let class = pkt.aclass();
+        let kind  = pkt.kind();
+        let class = pkt.class();
         let ttl   = pkt.ttl();
         let rdlen = pkt.rdlen();
         let rdata = pkt.rdata();
@@ -202,10 +200,10 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
         offset += amt;
 
         let pkt = packet::AnswerPacket::new_checked(&buffer[offset..])?;
-        offset += pkt.len();
+        offset += pkt.header_len();
         
-        let kind  = pkt.atype();
-        let class = pkt.aclass();
+        let kind  = pkt.kind();
+        let class = pkt.class();
         let ttl   = pkt.ttl();
         let rdlen = pkt.rdlen();
         let rdata = pkt.rdata();
@@ -218,6 +216,7 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
                 ttl,
                 record,
                 );
+        println!("rdlenL: {:?}", rdlen);
         offset += rdlen as usize;
     }
     
@@ -227,10 +226,10 @@ fn resolve(conn: &mut TcpStream, name: &str) -> Result<(), resolver::Error> {
         offset += amt;
 
         let pkt = packet::AnswerPacket::new_checked(&buffer[offset..])?;
-        offset += pkt.len();
+        offset += pkt.header_len();
 
-        let kind  = pkt.atype();
-        let class = pkt.aclass();
+        let kind  = pkt.kind();
+        let class = pkt.class();
         let ttl   = pkt.ttl();
         let rdlen = pkt.rdlen();
         let rdata = pkt.rdata();
