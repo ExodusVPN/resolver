@@ -3,6 +3,8 @@ use crate::packet::OpCode;
 use crate::packet::ResponseCode;
 
 
+pub const HEADER_SIZE: usize = 12;
+
 bitflags! {
     // DNS Header Flags
     // https://www.iana.org/assignments/dns-parameters/dns-parameters.xhtml#dns-parameters-12
@@ -162,20 +164,10 @@ impl Flags {
     }
 
     // 1 bits
-    // https://tools.ietf.org/html/rfc3225#section-3
-    // 
-    // explicit notification of the ability of
-    // the client to accept (if not understand) DNSSEC security RRs.
-    // 
-    // https://tools.ietf.org/html/rfc4035#section-4.9.1
-    // 
-    // A validating security-aware stub resolver MUST set the DO bit,
-    // because otherwise it will not receive the DNSSEC RRs it needs to
-    // perform signature validation.
-    // pub fn do_(&self) -> bool {
-    //     (self.bits & 0b_0000_0000_0100_0000) >> 6 == 1
-    // }
-
+    pub fn z(&self) -> bool {
+        (self.bits & 0b_0000_0000_0100_0000) >> 6 == 1
+    }
+    
     // 1 bits
     // https://tools.ietf.org/html/rfc3655#section-2
     // 
@@ -320,8 +312,6 @@ pub struct HeaderPacket<T: AsRef<[u8]>> {
 }
     
 impl<T: AsRef<[u8]>> HeaderPacket<T> {
-    pub const HEADER_SIZE: usize = 12;
-
     #[inline]
     pub fn new_unchecked(buffer: T) -> HeaderPacket<T> {
         HeaderPacket { buffer }
@@ -338,7 +328,7 @@ impl<T: AsRef<[u8]>> HeaderPacket<T> {
     #[inline]
     pub fn check_len(&self) -> Result<(), Error> {
         let data = self.buffer.as_ref();
-        if data.len() < Self::HEADER_SIZE {
+        if data.len() < HEADER_SIZE {
             return Err(Error::Truncated);
         }
 
@@ -397,7 +387,7 @@ impl<T: AsRef<[u8]>> HeaderPacket<T> {
 
     #[inline]
     pub fn len(&self) -> usize {
-        Self::HEADER_SIZE
+        HEADER_SIZE
     }
 }
 
@@ -405,7 +395,7 @@ impl<'a, T: AsRef<[u8]> + ?Sized> HeaderPacket<&'a T> {
     #[inline]
     pub fn payload(&self) -> &'a [u8] {
         let data = self.buffer.as_ref();
-        &data[Self::HEADER_SIZE..]
+        &data[HEADER_SIZE..]
     }
 }
 
@@ -463,7 +453,7 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> HeaderPacket<T> {
     pub fn payload_mut(&mut self) -> &mut [u8]{
         let data = self.buffer.as_mut();
         
-        &mut data[Self::HEADER_SIZE..]
+        &mut data[HEADER_SIZE..]
     }
 }
 

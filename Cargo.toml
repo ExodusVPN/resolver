@@ -9,3 +9,10 @@ edition = "2018"
 [dependencies]
 bitflags = "1.2"
 punycode = "0.4"
+base64   = "0.10"
+openssl  = "0.10"
+
+[features]
+default  = [ ]
+nightly  = [ ]
+vendored = [ "openssl/vendored" ]

@@ -1,6 +1,8 @@
 #[macro_use]
 extern crate bitflags;
 extern crate punycode;
+extern crate base64;
+extern crate openssl;
 
 mod error;
 pub mod packet;
@@ -33,3 +35,8 @@ pub const MAXIMUM_LABEL_SIZE: usize        = 63;
 pub const MAXIMUM_NAMES_SIZE: usize        = 255;
 /// 512 octets or less
 pub const MAXIMUM_UDP_MESSAGES_SIZE: usize = 512;
+
+
+pub fn init() {
+    openssl::init();
+}

@@ -60,19 +60,19 @@ use crate::packet::Class;
 /// 4.1.3. Resource record format
 /// The answer, authority, and additional sections all share the same format.
 #[derive(PartialEq, Clone)]
-pub struct AnswerPacket<T: AsRef<[u8]>> {
+pub struct RecordPacket<T: AsRef<[u8]>> {
     buffer: T
 }
 
-impl<T: AsRef<[u8]>> AnswerPacket<T> {
+impl<T: AsRef<[u8]>> RecordPacket<T> {
 
     #[inline]
-    pub fn new_unchecked(buffer: T) -> AnswerPacket<T> {
-        AnswerPacket { buffer }
+    pub fn new_unchecked(buffer: T) -> RecordPacket<T> {
+        RecordPacket { buffer }
     }
 
     #[inline]
-    pub fn new_checked(buffer: T) -> Result<AnswerPacket<T>, Error> {
+    pub fn new_checked(buffer: T) -> Result<RecordPacket<T>, Error> {
         let v = Self::new_unchecked(buffer);
         v.check_len()?;
 
@@ -150,9 +150,13 @@ impl<T: AsRef<[u8]>> AnswerPacket<T> {
     pub fn total_len(&self) -> usize {
         10 + self.rdlen() as usize
     }
+
+    pub fn value(&self) -> Result<(), Error> {
+        unimplemented!();
+    }
 }
 
-impl<'a, T: AsRef<[u8]> + ?Sized> AnswerPacket<&'a T> {
+impl<'a, T: AsRef<[u8]> + ?Sized> RecordPacket<&'a T> {
     /// Additional RR-specific data
     #[inline]
     pub fn rdata(&self) -> &'a [u8] {
@@ -170,7 +174,7 @@ impl<'a, T: AsRef<[u8]> + ?Sized> AnswerPacket<&'a T> {
     }
 }
 
-impl<T: AsRef<[u8]> + AsMut<[u8]>> AnswerPacket<T> {
+impl<T: AsRef<[u8]> + AsMut<[u8]>> RecordPacket<T> {
     #[inline]
     pub fn set_kind(&mut self, value: Kind) {
         let data = self.buffer.as_mut();
@@ -229,9 +233,9 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> AnswerPacket<T> {
     }
 }
 
-impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Debug for AnswerPacket<&'a T> {
+impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Debug for RecordPacket<&'a T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "AnswerPacket {{ kind: {:?}, class: {:?}, ttl: {:?}, rdlen: {:?}, rdata: {:?} }}",
+        write!(f, "RecordPacket {{ kind: {:?}, class: {:?}, ttl: {:?}, rdlen: {:?}, rdata: {:?} }}",
                 self.kind(),
                 self.class(),
                 self.ttl(),
@@ -241,9 +245,9 @@ impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Debug for AnswerPacket<&'a T> {
     }
 }
 
-impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Display for AnswerPacket<&'a T> {
+impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Display for RecordPacket<&'a T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "AnswerPacket {{ kind: {}, class: {}, ttl: {}, rdlen: {}, rdata: {:?} }}",
+        write!(f, "RecordPacket {{ kind: {}, class: {}, ttl: {}, rdlen: {}, rdata: {:?} }}",
                 self.kind(),
                 self.class(),
                 self.ttl(),

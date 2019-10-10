@@ -1,3 +1,4 @@
+use crate::error::Error;
 
 mod name;
 mod header;
@@ -5,6 +6,8 @@ mod question;
 mod answer;
 mod record;
 mod extension;
+mod dnssec;
+mod pretty_print;
 
 pub use self::name::*;
 pub use self::header::*;
@@ -12,6 +15,190 @@ pub use self::question::*;
 pub use self::answer::*;
 pub use self::record::*;
 pub use self::extension::*;
+pub use self::dnssec::*;
+pub use self::pretty_print::*;
+
+use std::net::IpAddr;
+use std::collections::HashMap;
+
+
+pub const BUFFER_SIZE: usize = 1024 * 64 - 1; // 64K
+
+
+#[inline]
+pub fn alloc() -> [u8; BUFFER_SIZE] {
+    [0u8; BUFFER_SIZE]
+}
+
+pub fn write_dnssec_and_ecs(offset: usize, buffer: &mut [u8], addr: IpAddr, prefix_len: u8) -> Result<usize, Error> {
+    let (rdlen, opt_len) = match addr {
+        IpAddr::V4(v4_addr) => {
+            assert!(prefix_len <= 32);
+            (2 + 2 + 2 + 1 + 1 + 4, 2 + 1 + 1 + 4)
+        },
+        IpAddr::V6(_) => {
+            assert!(prefix_len <= 128);
+            (2 + 2 + 2 + 1 + 1 + 16, 2 + 1 + 1 + 16)
+        },
+    };
+
+    // DNSSEC
+    buffer[offset] = 0; // Name: . (ROOT)
+    let mut pkt = ExtensionPacket::new_unchecked(&mut buffer[offset + 1..]);
+    pkt.set_kind(Kind::OPT);
+    pkt.set_udp_size(BUFFER_SIZE as u16);
+    pkt.set_rcode(0);
+    pkt.set_version(EXT_HEADER_V0);
+    pkt.set_flags(ExtensionFlags::DO);
+    pkt.set_rdlen(rdlen);
+
+    let mut opt = ExtensionDataPacket::new_unchecked(pkt.rdata_mut());
+    opt.set_option_code(OptionCode::EDNS_CLIENT_SUBNET);
+    opt.set_option_length(opt_len);
+
+    // ECS
+    let mut ecs = ClientSubnetPacket::new_unchecked(opt.option_data_mut());
+    ecs.set_family(AddressFamily::IPV4);
+    ecs.set_src_prefixlen(prefix_len);
+    ecs.set_scope_prefixlen(0);
+    ecs.set_address(addr);
+
+    let amt = pkt.header_len() + rdlen as usize + 1;
+
+    Ok(amt)
+}
+
+pub fn write_dnssec(offset: usize, buffer: &mut [u8]) -> Result<usize, Error> {
+    let rdlen = 4usize;
+
+    // DNSSEC
+    buffer[offset] = 0; // Name: . (ROOT)
+    let mut pkt = ExtensionPacket::new_unchecked(&mut buffer[offset + 1..]);
+    pkt.set_kind(Kind::OPT);
+    pkt.set_udp_size(BUFFER_SIZE as u16);
+    pkt.set_rcode(0);
+    pkt.set_version(EXT_HEADER_V0);
+    pkt.set_flags(ExtensionFlags::DO);
+    pkt.set_rdlen(rdlen as u16);
+
+    let mut opt = ExtensionDataPacket::new_unchecked(pkt.rdata_mut());
+    opt.set_option_code(OptionCode::new(0));
+    opt.set_option_length(0);
+
+    let amt = pkt.header_len() + rdlen as usize + 1;
+
+    Ok(amt)
+}
+
+
+pub struct QueryBuilder<T: AsRef<[u8]> + AsMut<[u8]>> {
+    buffer: T,
+    qdcount: u16,
+    name_dict: HashMap<u64, u16>,
+    len: usize,
+    opt_rr_exists: bool,
+}
+
+impl<T: AsRef<[u8]> + AsMut<[u8]>> QueryBuilder<T> {
+    pub fn new(buffer: T) -> Self {
+        let mut builder = Self {
+            buffer,
+            qdcount: 0,
+            name_dict: HashMap::new(),
+            len: HEADER_SIZE,
+            opt_rr_exists: false,
+        };
+
+        let mut hdr_pkt = builder
+            .set_id(0)
+            .set_flags(Flags::RECURSION_REQUEST)
+            .header_pkt();
+        hdr_pkt.set_qdcount(0);
+        hdr_pkt.set_ancount(0);
+        hdr_pkt.set_nscount(0);
+        hdr_pkt.set_arcount(0);
+
+        builder
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn set_id(&mut self, id: u16) -> &mut Self {
+        let mut pkt = self.header_pkt();
+        pkt.set_id(id);
+        
+        self
+    }
+
+    pub fn set_flags(&mut self, flags: Flags) -> &mut Self {
+        let mut pkt = self.header_pkt();
+        pkt.set_flags(flags);
+        
+        self
+    }
+    
+    fn header_pkt(&mut self) -> HeaderPacket<&mut [u8]> {
+        let data = self.buffer.as_mut();
+        HeaderPacket::new_unchecked(data)
+    }
+
+    pub fn add_question<N: AsRef<str>>(&mut self, qname: N, qkind: Kind, qclass: Class) -> Result<&mut Self, Error> {
+        assert_eq!(self.opt_rr_exists, false);
+
+        let mut data = self.buffer.as_mut();
+
+        let amt = write_name(qname.as_ref(), self.len, &mut data, &mut self.name_dict)?;
+
+        let mut pkt = QuestionPacket::new_unchecked(&mut data[self.len + amt..]);
+        pkt.set_kind(qkind);
+        pkt.set_class(qclass);
+
+        self.len += amt + pkt.len();
+        self.qdcount += 1;
+
+        Ok(self)
+    }
+
+    pub fn add_opt_record(&mut self, client_cidr: Option<(IpAddr, u8)>) -> Result<&mut Self, Error> {
+        assert_eq!(self.opt_rr_exists, false);
+        let data = self.buffer.as_mut();
+
+        match client_cidr {
+            Some((client_ip, prefix_len)) => {
+                let amt = write_dnssec_and_ecs(self.len, data, client_ip, prefix_len)?;
+                self.len += amt;
+            },
+            None => {
+                let amt = write_dnssec(self.len, data)?;
+                self.len += amt;
+            },
+        }
+        
+        self.opt_rr_exists = true;
+
+        Ok(self)
+    }
+
+    pub fn build(&mut self) -> &[u8] {
+        let qdcount = self.qdcount;
+        let opt_rr_exists = self.opt_rr_exists;
+
+        let mut hdr_pkt = self.header_pkt();
+        hdr_pkt.set_qdcount(qdcount);
+        hdr_pkt.set_ancount(0);
+        hdr_pkt.set_nscount(0);
+        if opt_rr_exists {
+            hdr_pkt.set_arcount(1);
+        }
+        
+        let data = self.buffer.as_ref();
+
+        &data[..self.len]
+    }
+}
+
 
 // 4. MESSAGES
 // 4.1. Format
@@ -475,14 +662,12 @@ impl std::fmt::Display for Class {
         let class = if self.is_unicast() { self.class() } else { *self };
 
         match &class {
-            &Class::IN => write!(f, "IN"),
-            &Class::CS => write!(f, "CS"),
-            &Class::CH => write!(f, "CH"),
-            &Class::HS => write!(f, "HS"),
-            
-            &Class::NONE => write!(f, "NONE"),
-            &Class::ANY => write!(f, "ANY"),
-
+            &Self::IN => write!(f, "IN"),
+            &Self::CS => write!(f, "CS"),
+            &Self::CH => write!(f, "CH"),
+            &Self::HS => write!(f, "HS"),
+            &Self::NONE => write!(f, "NONE"),
+            &Self::ANY => write!(f, "ANY"),
             _ => {
                 if class.is_unassigned() {
                     write!(f, "Unassigned({})", class.0)
@@ -556,14 +741,12 @@ impl OpCode {
 impl std::fmt::Display for OpCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            &OpCode::QUERY => write!(f, "QUERY"),
-            &OpCode::IQUERY => write!(f, "IQUERY"),
-            &OpCode::STATUS => write!(f, "STATUS"),
-            &OpCode::NOTIFY => write!(f, "NOTIFY"),
-            
-            &OpCode::UPDATE => write!(f, "UPDATE"),
-            &OpCode::DNS_STATEFUL_OPERATIONS => write!(f, "DNS_STATEFUL_OPERATIONS"),
-
+            &Self::QUERY => write!(f, "QUERY"),
+            &Self::IQUERY => write!(f, "IQUERY"),
+            &Self::STATUS => write!(f, "STATUS"),
+            &Self::NOTIFY => write!(f, "NOTIFY"),
+            &Self::UPDATE => write!(f, "UPDATE"),
+            &Self::DNS_STATEFUL_OPERATIONS => write!(f, "DNS_STATEFUL_OPERATIONS"),
             _ => {
                 if self.is_unassigned() {
                     write!(f, "Unassigned({})", self.0)
@@ -606,7 +789,7 @@ impl std::fmt::Display for OpCode {
 
 // 8 Bits + 4 Bits
 /// Response code - this 4 bit field is set as part of responses.
-#[derive(PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub struct ResponseCode(u16);
 
 impl ResponseCode {
@@ -684,6 +867,16 @@ impl ResponseCode {
     }
 
     #[inline]
+    pub fn is_ok(&self) -> bool {
+        *self == Self::OK
+    }
+
+    #[inline]
+    pub fn is_err(&self) -> bool {
+        !self.is_ok()
+    }
+
+    #[inline]
     pub fn is_unassigned(&self) -> bool {
         // 12-15        Unassigned
         // 24-3840      Unassigned
@@ -703,38 +896,34 @@ impl ResponseCode {
             _ => false,
         }
     }
-}
 
-impl std::fmt::Debug for ResponseCode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    pub fn description(&self) -> &'static str {
         match self {
-            &ResponseCode::OK => write!(f, "OK"),
-            &ResponseCode::FORMAT_ERROR => write!(f, "FORMAT_ERROR"),
-            &ResponseCode::SERVER_FAILURE => write!(f, "SERVER_FAILURE"),
-            &ResponseCode::NON_EXISTENT_DOMAIN => write!(f, "NON_EXISTENT_DOMAIN"),
-            &ResponseCode::NOT_IMPLEMENTED => write!(f, "NOT_IMPLEMENTED"),
-            &ResponseCode::QUERY_REFUSED  => write!(f, "QUERY_REFUSED"),
-            &ResponseCode::YXDOMAIN  => write!(f, "YXDOMAIN"),
-            &ResponseCode::YXRRSET  => write!(f, "YXRRSET"),
-            &ResponseCode::NXRRSET  => write!(f, "NXRRSET"),
-            &ResponseCode::NOT_AUTH  => write!(f, "NOT_AUTH"),
-            &ResponseCode::NOT_ZONE  => write!(f, "NOT_ZONE"),
-
-            &ResponseCode::DSOTYPENI  => write!(f, "DSOTYPENI"),
-            &ResponseCode::BADVERS  => write!(f, "BADVERS"),
-            &ResponseCode::BADKEY  => write!(f, "BADKEY"),
-            &ResponseCode::BADTIME  => write!(f, "BADTIME"),
-            &ResponseCode::BADMODE  => write!(f, "BADMODE"),
-            &ResponseCode::BADNAME  => write!(f, "BADNAME"),
-            &ResponseCode::BADALG  => write!(f, "BADALG"),
-            &ResponseCode::BADTRUNC  => write!(f, "BADTRUNC"),
-            &ResponseCode::BADCOOKIE  => write!(f, "BADCOOKIE"),
-
+            &Self::OK => "No Error [RFC1035]",
+            &Self::FORMAT_ERROR => "Format Error [RFC1035]",
+            &Self::SERVER_FAILURE => "Server Failure [RFC1035]",
+            &Self::NON_EXISTENT_DOMAIN => "Non-Existent Domain [RFC1035]",
+            &Self::NOT_IMPLEMENTED => "Not Implemented [RFC1035]",
+            &Self::QUERY_REFUSED  => "Query Refused [RFC1035]",
+            &Self::YXDOMAIN  => "Name Exists when it should not [RFC2136] [RFC6672]",
+            &Self::YXRRSET  => "RR Set Exists when it should not [RFC2136]",
+            &Self::NXRRSET  => "RR Set that should exist does not [RFC2136]",
+            &Self::NOT_AUTH  => "Server Not Authoritative for zone [RFC2136]",
+            &Self::NOT_ZONE  => "Name not contained in zone [RFC2136]",
+            &Self::DSOTYPENI  => "DSO-TYPE Not Implemented RFC8490",
+            &Self::BADVERS  => "Bad OPT Version RFC6891",
+            &Self::BADKEY  => "Key not recognized  RFC2845",
+            &Self::BADTIME  => "Signature out of time window RFC2845",
+            &Self::BADMODE  => "Bad TKEY Mode RFC2930",
+            &Self::BADNAME  => "Duplicate key name RFC2930",
+            &Self::BADALG  => "Algorithm not supported RFC2930",
+            &Self::BADTRUNC  => "Bad Truncation RFC4635",
+            &Self::BADCOOKIE  => "Bad/missing Server Cookie RFC7873",
             _ => {
                 if self.is_unassigned() {
-                    write!(f, "Unassigned({})", self.0)
+                    "Unassigned"
                 } else {
-                    write!(f, "Unknow({})", self.0)
+                    "Unknow"
                 }
             },
         }
@@ -744,27 +933,26 @@ impl std::fmt::Debug for ResponseCode {
 impl std::fmt::Display for ResponseCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            &ResponseCode::OK => write!(f, "No Error [RFC1035]"),
-            &ResponseCode::FORMAT_ERROR => write!(f, "Format Error [RFC1035]"),
-            &ResponseCode::SERVER_FAILURE => write!(f, "Server Failure [RFC1035]"),
-            &ResponseCode::NON_EXISTENT_DOMAIN => write!(f, "Non-Existent Domain [RFC1035]"),
-            &ResponseCode::NOT_IMPLEMENTED => write!(f, "Not Implemented [RFC1035]"),
-            &ResponseCode::QUERY_REFUSED  => write!(f, "Query Refused [RFC1035]"),
-            &ResponseCode::YXDOMAIN  => write!(f, "Name Exists when it should not [RFC2136] [RFC6672]"),
-            &ResponseCode::YXRRSET  => write!(f, "RR Set Exists when it should not [RFC2136]"),
-            &ResponseCode::NXRRSET  => write!(f, "RR Set that should exist does not [RFC2136]"),
-            &ResponseCode::NOT_AUTH  => write!(f, "Server Not Authoritative for zone [RFC2136]"),
-            &ResponseCode::NOT_ZONE  => write!(f, "Name not contained in zone [RFC2136]"),
-
-            &ResponseCode::DSOTYPENI  => write!(f, "DSO-TYPE Not Implemented RFC8490"),
-            &ResponseCode::BADVERS  => write!(f, "Bad OPT Version RFC6891"),
-            &ResponseCode::BADKEY  => write!(f, "Key not recognized  RFC2845"),
-            &ResponseCode::BADTIME  => write!(f, "Signature out of time window RFC2845"),
-            &ResponseCode::BADMODE  => write!(f, "Bad TKEY Mode RFC2930"),
-            &ResponseCode::BADNAME  => write!(f, "Duplicate key name RFC2930"),
-            &ResponseCode::BADALG  => write!(f, "Algorithm not supported RFC2930"),
-            &ResponseCode::BADTRUNC  => write!(f, "Bad Truncation RFC4635"),
-            &ResponseCode::BADCOOKIE  => write!(f, "Bad/missing Server Cookie RFC7873"),
+            &Self::OK => write!(f, "OK"),
+            &Self::FORMAT_ERROR => write!(f, "FORMAT_ERROR"),
+            &Self::SERVER_FAILURE => write!(f, "SERVER_FAILURE"),
+            &Self::NON_EXISTENT_DOMAIN => write!(f, "NON_EXISTENT_DOMAIN"),
+            &Self::NOT_IMPLEMENTED => write!(f, "NOT_IMPLEMENTED"),
+            &Self::QUERY_REFUSED  => write!(f, "QUERY_REFUSED"),
+            &Self::YXDOMAIN  => write!(f, "YXDOMAIN"),
+            &Self::YXRRSET  => write!(f, "YXRRSET"),
+            &Self::NXRRSET  => write!(f, "NXRRSET"),
+            &Self::NOT_AUTH  => write!(f, "NOT_AUTH"),
+            &Self::NOT_ZONE  => write!(f, "NOT_ZONE"),
+            &Self::DSOTYPENI  => write!(f, "DSOTYPENI"),
+            &Self::BADVERS  => write!(f, "BADVERS"),
+            &Self::BADKEY  => write!(f, "BADKEY"),
+            &Self::BADTIME  => write!(f, "BADTIME"),
+            &Self::BADMODE  => write!(f, "BADMODE"),
+            &Self::BADNAME  => write!(f, "BADNAME"),
+            &Self::BADALG  => write!(f, "BADALG"),
+            &Self::BADTRUNC  => write!(f, "BADTRUNC"),
+            &Self::BADCOOKIE  => write!(f, "BADCOOKIE"),
             _ => {
                 if self.is_unassigned() {
                     write!(f, "Unassigned({})", self.0)

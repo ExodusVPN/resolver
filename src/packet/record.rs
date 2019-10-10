@@ -4,40 +4,89 @@ use crate::packet::Kind;
 use crate::packet::Class;
 use crate::packet::Flags;
 use crate::packet::read_name;
+use crate::packet::OptionCode;
+use crate::packet::AddressFamily;
+use crate::packet::DNSKEYProtocol;
+use crate::packet::DNSKEYFlags;
+use crate::packet::Algorithm;
 
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 
-pub struct Question {
-    pub name: String,
-    pub kind: Kind,
-    pub class: Class,
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub struct ClientSubnet {
+    pub address_family: AddressFamily,
+    pub src_prefix_len: u8,
+    pub scope_prefix_len: u8,
+    pub address: IpAddr,
 }
 
-pub struct Answer<'a> {
-    pub name: String,
-    pub kind: Kind,
-    pub class: Class,
-    pub ttl: u32,
-    pub value: Record<'a>
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub enum OptionValue<'a> {
+    None,
+    ClientSubnet(ClientSubnet),
+    Raw(&'a [u8]),
 }
 
-
-pub struct Request {
-    pub id: u16,
-    pub flags: Flags,
-    pub questions: Vec<Question>,
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub enum Value<'a> {
+    V4(Ipv4Addr),
+    V6(Ipv6Addr),
+    String(String),
+    Str(&'a str),
+    HINFO {
+        cpu: String,        // The CPU field of the HINFO RDATA SHOULD be set to "RFC8482".
+        os: Option<String>, // The OS field of the HINFO RDATA SHOULD be set to the null string to minimize the size of the response.
+    },
+    MX {
+        preference: i16,
+        exchange: String,
+    },
+    OPT {
+        code: OptionCode,      // EXTENDED-RCODE
+        // length: u16,
+        // data: &'a [u8],
+        value: OptionValue<'a>,
+    },
+    SOA {
+        mname: String,
+        rname: String,
+        serial: u32,
+        refresh: i32,
+        retry: i32,
+        expire: i32,
+        minimum: u32,
+    },
+    Raw(&'a [u8]),
 }
 
-pub struct Response<'a> {
-    pub id: u16,
-    pub flags: Flags,
-    pub questions: Vec<Question>,
-    pub answers: Vec<Answer<'a>>,
-    pub authorities: Vec<Answer<'a>>,
-    pub additionals: Vec<Answer<'a>>,
+impl<'a> std::fmt::Display for Value<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self {
+            &Self::V4(addr) => std::fmt::Display::fmt(&addr, f),
+            &Self::V6(addr) => std::fmt::Display::fmt(&addr, f),
+            &Self::String(s) => std::fmt::Display::fmt(&s, f),
+            &Self::Str(s) => std::fmt::Display::fmt(s, f),
+            &Self::HINFO { ref cpu, ref os } => {
+                write!(f, "cpu: {}, os:{}", cpu,
+                    match os {
+                        Some(ref os) => os,
+                        None => "N/A"
+                    })
+            },
+            &Self::MX { preference, exchange } => write!(f, "preference: {}, exchange: {}", preference, exchange),
+            &Self::OPT { code, value } => {
+                write!(f, "code={}", code)
+            },
+            &Self::SOA { mname, rname, serial, refresh, retry, expire, minimum } => {
+                write!(f, "mname: {}, rname: {}, serial: {}, refresh: {}, retry: {}, expire: {}, minimum: {}",
+                    mname, rname, serial, refresh, retry, expire, minimum)
+            },
+            &Self::Raw(data) => write!(f, "{:?}", data),
+        }
+    }
 }
-
 
 // 3.3. Standard RRs
 // https://tools.ietf.org/html/rfc1035#section-3.3
@@ -45,6 +94,9 @@ pub struct Response<'a> {
 // 
 // List_of_DNS_record_types
 // https://en.wikipedia.org/wiki/List_of_DNS_record_types
+
+// Apart from the new DNS server and client concepts, 
+// DNSSEC introduced to the DNS the following 4 new resource records: DNSKEY, RRSIG, NSEC and DS. 
 
 /// resource record value
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
@@ -85,11 +137,40 @@ pub enum Record<'a> {
 
     // TODO:
     // https://tools.ietf.org/html/rfc4034
-    // RRSIG,
-    // DNSKEY(),
-    // DS,
+    DNSKEY {
+        flags: DNSKEYFlags,         // 16 bits
+        protocol: DNSKEYProtocol,   //  8 bits
+        algorithm: Algorithm,       //  8 bits
+    },
+    RRSIG {
+        type_covered: u16,
+        algorithm: Algorithm,       //  8 bits
+        labels: u8,
+        original_ttl: u32,
+        signature_expiration: u32,
+        signature_inception: u32,
+        key_tag: u16,
+        signer_name: &'a str,
+        signature: &'a [u8],
+    },
+    // 4.  The NSEC Resource Record
+    // https://tools.ietf.org/html/rfc4034#page-12
     // NSEC,
-    // NSEC3
+    // 3.  The NSEC3 Resource Record
+    // https://tools.ietf.org/html/rfc5155#section-3.2
+    NSEC3 {
+        hash_algorithm: u8,
+        flags: u8,
+        iterations: u16,
+        salt_length: u8,
+        salt: u32,
+        hash_length: u8,
+        next_hashed_owner_name: &'a str,
+        // type_bit_maps: 
+    },
+    // DS,
+    
+
     // DLV,
     // KEY,
     // KX,

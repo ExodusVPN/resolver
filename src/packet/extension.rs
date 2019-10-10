@@ -99,7 +99,7 @@ impl OptionCode {
     pub const DEVICE_ID: Self          = Self(26946);
 
     #[inline]
-    pub fn new(code: u16) -> Self {
+    pub const fn new(code: u16) -> Self {
         Self(code)
     }
 
@@ -409,6 +409,8 @@ impl<'a, T: AsRef<[u8]> + ?Sized> ExtensionPacket<&'a T> {
 impl<T: AsRef<[u8]> + AsMut<[u8]>> ExtensionPacket<T> {
     #[inline]
     pub fn set_kind(&mut self, value: Kind) {
+        assert_eq!(value, Kind::OPT);
+
         let data = self.buffer.as_mut();
         let octets = value.0.to_be_bytes();
 
@@ -706,12 +708,12 @@ impl<T: AsRef<[u8]>> ClientSubnetPacket<T> {
         // Check prefix len
         match addr_family {
             AddressFamily::IPV4 => {
-                if self.src_prefixlen() > 32 || self.dst_prefixlen() > 32 {
+                if self.src_prefixlen() > 32 || self.scope_prefixlen() > 32 {
                     return Err(Error::Unrecognized);
                 }
             },
             AddressFamily::IPV6 => {
-                if self.src_prefixlen() > 128 || self.dst_prefixlen() > 128 {
+                if self.src_prefixlen() > 128 || self.scope_prefixlen() > 128 {
                     return Err(Error::Unrecognized);
                 }
             },
@@ -744,7 +746,7 @@ impl<T: AsRef<[u8]>> ClientSubnetPacket<T> {
 
     // 8 bits
     #[inline]
-    pub fn dst_prefixlen(&self) -> u8 {
+    pub fn scope_prefixlen(&self) -> u8 {
         // SCOPE PREFIX-LENGTH
         let data = self.buffer.as_ref();
         data[3]
@@ -818,7 +820,7 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> ClientSubnetPacket<T> {
     }
 
     #[inline]
-    pub fn set_dst_prefixlen(&mut self, value: u8) {
+    pub fn set_scope_prefixlen(&mut self, value: u8) {
         let data = self.buffer.as_mut();
 
         data[3] = value;
@@ -874,7 +876,7 @@ impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Debug for ExtensionPacket<&'a T> {
 
 impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Display for ExtensionPacket<&'a T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ExtensionPacket {{ kind: {:?}, udp_size: {:?}, rcode: {:?}, version: {:?}, flags: {:?}, rdlen: {:?}, rdata: {:?} }}",
+        write!(f, "ExtensionPacket {{ kind: {}, udp_size: {:?}, rcode: {:?}, version: {:?}, flags: {:?}, rdlen: {:?}, rdata: {:?} }}",
                 self.kind(),
                 self.udp_size(),
                 self.rcode(),
@@ -899,7 +901,7 @@ impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Debug for ExtensionDataPacket<&'a T>
 
 impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Display for ExtensionDataPacket<&'a T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ExtensionDataPacket {{ option_code: {:?}, option_length: {:?}, option_data: {:?} }}",
+        write!(f, "ExtensionDataPacket {{ option_code: {}, option_length: {:?}, option_data: {:?} }}",
                 self.option_code(),
                 self.option_length(),
                 self.option_data(),
@@ -910,10 +912,10 @@ impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Display for ExtensionDataPacket<&'a 
 
 impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Debug for ClientSubnetPacket<&'a T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ClientSubnetPacket {{ family: {:?}, src_prefixlen: {:?}, dst_prefixlen: {:?}, address: {:?} }}",
+        write!(f, "ClientSubnetPacket {{ family: {:?}, src_prefixlen: {:?}, scope_prefixlen: {:?}, address: {:?} }}",
                 self.family(),
                 self.src_prefixlen(),
-                self.dst_prefixlen(),
+                self.scope_prefixlen(),
                 self.address(),
         )
     }
@@ -921,10 +923,10 @@ impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Debug for ClientSubnetPacket<&'a T> 
 
 impl<'a, T: AsRef<[u8]> + ?Sized> std::fmt::Display for ClientSubnetPacket<&'a T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ClientSubnetPacket {{ family: {:?}, src_prefixlen: {:?}, dst_prefixlen: {:?}, address: {:?} }}",
+        write!(f, "ClientSubnetPacket {{ family: {}, src_prefixlen: {:?}, scope_prefixlen: {:?}, address: {} }}",
                 self.family(),
                 self.src_prefixlen(),
-                self.dst_prefixlen(),
+                self.scope_prefixlen(),
                 self.address(),
         )
     }
