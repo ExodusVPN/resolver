@@ -13,6 +13,7 @@ pub enum Error {
     InvalidLabelKind,
     InvalidExtLabelKind,
     InvalidHinfoRecord,
+    InvalidAlgorithm,
     /// An incoming packet could not be parsed because some of its fields were out of bounds of the received data.
     Truncated,
     /// An incoming packet could not be recognized and was dropped.

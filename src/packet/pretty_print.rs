@@ -94,12 +94,14 @@ fn print_record_packet(ident: usize,
             println!();
         }
         
-        // The original header flags has been extended.
-        let new_header_rcode = packet::ResponseCode::new(((ext_rcode as u16) << 8) | header_rcode.code());
-        println!("{:ident$}⚠️  The original header rcode has been extended: {} --> {}",
-            EMPTY, header_rcode, new_header_rcode, ident = ident);
-        *header_rcode = new_header_rcode;
-
+        if ext_rcode > 0 {
+            // The original header flags has been extended.
+            let new_header_rcode = packet::ResponseCode::new(((ext_rcode as u16) << 8) | header_rcode.code());
+            println!("{:ident$}⚠️  The original header rcode has been extended: {} --> {}",
+                EMPTY, header_rcode, new_header_rcode, ident = ident);
+            *header_rcode = new_header_rcode;
+        }
+        
         *offset += rdlen as usize;
     } else {
         let class = rr.class();

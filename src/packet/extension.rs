@@ -5,8 +5,8 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 
 
-/// EDNS Version Number
 // RFC4035 RFC3225 RFC6840
+/// EDNS Version Number
 pub const EXT_HEADER_V0: u8 = 0; // EDNS(0)
 
 

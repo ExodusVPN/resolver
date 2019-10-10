@@ -9,6 +9,8 @@ use crate::packet::AddressFamily;
 use crate::packet::DNSKEYProtocol;
 use crate::packet::DNSKEYFlags;
 use crate::packet::Algorithm;
+use crate::packet::DigestKind;
+
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -141,6 +143,7 @@ pub enum Record<'a> {
         flags: DNSKEYFlags,         // 16 bits
         protocol: DNSKEYProtocol,   //  8 bits
         algorithm: Algorithm,       //  8 bits
+        public_key: &'a str,
     },
     RRSIG {
         type_covered: u16,
@@ -150,26 +153,82 @@ pub enum Record<'a> {
         signature_expiration: u32,
         signature_inception: u32,
         key_tag: u16,
-        signer_name: &'a str,
+        signer_name: String,
         signature: &'a [u8],
     },
     // 4.  The NSEC Resource Record
     // https://tools.ietf.org/html/rfc4034#page-12
-    // NSEC,
+    NSEC {
+        next_domain_name: String,
+        type_bit_maps: &'a [u8],
+    },
     // 3.  The NSEC3 Resource Record
     // https://tools.ietf.org/html/rfc5155#section-3.2
     NSEC3 {
-        hash_algorithm: u8,
+        hash_algorithm: Algorithm,
+        // https://tools.ietf.org/html/rfc5155#section-3.2
+        // 
+        // Flags field is a single octet, the Opt-Out flag is the least
+        // significant bit, as shown below:
+        // 
+        // 0 1 2 3 4 5 6 7
+        // +-+-+-+-+-+-+-+-+
+        // |             |O|
+        // +-+-+-+-+-+-+-+-+
         flags: u8,
         iterations: u16,
         salt_length: u8,
-        salt: u32,
+        salt: &'a [u8],
         hash_length: u8,
-        next_hashed_owner_name: &'a str,
-        // type_bit_maps: 
+        // It is the unmodified binary hash value.
+        next_hashed_owner_name: &'a [u8],
+        // 3.2.1.  Type Bit Maps Encoding
+        // https://tools.ietf.org/html/rfc5155#section-3.2.1
+        type_bit_maps: &'a [u8],
     },
-    // DS,
-    
+
+    // 4.2.  NSEC3PARAM RDATA Wire Format
+    // https://tools.ietf.org/html/rfc5155#section-4.2
+    NSEC3PARAM {
+        hash_algorithm: Algorithm,
+        flags: u8,
+        iterations: u16,
+        salt_length: u8,
+        salt: &'a [u8],
+    },
+
+    // 5.1.  DS RDATA Wire Format
+    // https://tools.ietf.org/html/rfc4034#section-5.1
+    DS {
+        key_tag: u16,
+        algorithm: Algorithm,
+        // A.2.  DNSSEC Digest Types
+        // https://tools.ietf.org/html/rfc4034#appendix-A.2
+        // 2.  Implementing the SHA-256 Algorithm for DS Record Support
+        // https://tools.ietf.org/html/rfc4509#section-2
+        // 
+        // VALUE   Algorithm                 STATUS
+        //  0      Reserved                   -
+        //  1      SHA-1                   MANDATORY
+        // 2-255   Unassigned                 -
+        // 
+        //  2      SHA-256
+        // 
+        // A SHA-256 bit digest value calculated by using the following
+        // formula ("|" denotes concatenation).  The resulting value is not
+        // truncated, and the entire 32 byte result is to be used in the
+        // resulting DS record and related calculations.
+        // 
+        //      digest = SHA_256(DNSKEY owner name | DNSKEY RDATA)
+        // 
+        // where DNSKEY RDATA is defined by [RFC4034] as:
+        // 
+        //      DNSKEY RDATA = Flags | Protocol | Algorithm | Public Key
+        // 
+        digest_type: DigestKind,
+        digest: &'a [u8],
+    },
+        
 
     // DLV,
     // KEY,
@@ -328,6 +387,147 @@ impl<'a> Record<'a> {
                 ]);
 
                 Ok(Record::SOA { mname, rname, serial, refresh, retry, expire, minimum })
+            },
+            Kind::RRSIG => {
+                if rdata.len() < 19 {
+                    return Err(Error::Truncated);
+                }
+
+                let a = packet[offset];
+                let b = packet[offset+1];
+                let type_covered = u16::from_be_bytes([a, b]);
+                let algorithm = Algorithm(packet[offset+2]);
+                let labels = packet[offset+3];
+                let original_ttl = u32::from_be_bytes([
+                    packet[offset+4],
+                    packet[offset+5],
+                    packet[offset+6],
+                    packet[offset+7],
+                ]);
+                let signature_expiration = u32::from_be_bytes([
+                    packet[offset+8],
+                    packet[offset+9],
+                    packet[offset+10],
+                    packet[offset+11],
+                ]);
+                let signature_inception = u32::from_be_bytes([
+                    packet[offset+12],
+                    packet[offset+13],
+                    packet[offset+14],
+                    packet[offset+15],
+                ]);
+                let key_tag = u16::from_be_bytes([
+                    packet[offset+16],
+                    packet[offset+17],
+                ]);
+
+                let mut signer_name = String::new();
+                let _amt = read_name(offset+18, packet, &mut signer_name, 0)?;
+                
+                if rdata.len() < 19 + _amt {
+                    return Err(Error::Truncated);
+                }
+
+                let signature = &rdata[18+_amt..];
+
+                Ok(Record::RRSIG {
+                    type_covered,
+                    algorithm,
+                    labels,
+                    original_ttl,
+                    signature_expiration,
+                    signature_inception,
+                    key_tag,
+                    signer_name,
+                    signature,
+                })
+            },
+            Kind::DS => {
+                if rdata.len() < 5 {
+                    return Err(Error::Truncated);
+                }
+
+                let key_tag = u16::from_be_bytes([packet[offset], packet[offset+1]]);
+                let algorithm = Algorithm(packet[offset+2]);
+                // 1      SHA-1                   MANDATORY
+                // 2      SHA-256
+                let digest_type = DigestKind(packet[offset+3]);
+                let digest = &rdata[4..];
+
+                Ok(Record::DS {
+                    key_tag,
+                    algorithm,
+                    digest_type,
+                    digest,
+                })
+            },
+            Kind::NSEC => {
+                let mut next_domain_name = String::new();
+                let _amt = read_name(offset, packet, &mut next_domain_name, 0)?;
+                if rdata.len() < _amt {
+                    return Err(Error::Truncated);
+                }
+                let type_bit_maps = &rdata[_amt..];
+
+                Ok(Record::NSEC {
+                    next_domain_name,
+                    type_bit_maps,
+                })
+            },
+            Kind::NSEC3 => {
+                if rdata.len() < 6 {
+                    return Err(Error::Truncated);
+                }
+
+                let hash_algorithm = Algorithm(packet[offset]);
+                let flags = packet[offset+1];
+                let iterations = u16::from_be_bytes([packet[offset+2], packet[offset+3]]);
+                let salt_length = packet[offset+4];
+
+                let salt_end = 5 + salt_length as usize;
+                if rdata.len() < salt_end + 1 {
+                    return Err(Error::Truncated);
+                }
+                let salt = &rdata[5..salt_end];
+                
+                let hash_length = rdata[salt_end];
+                let hash_start = salt_end + 1;
+                let hash_end = hash_start + hash_length as usize;
+                if rdata.len() < hash_end + 1 {
+                    return Err(Error::Truncated);
+                }
+                let next_hashed_owner_name = &rdata[hash_start..hash_end];
+                let type_bit_maps = &rdata[hash_end+1..];
+
+                Ok(Record::NSEC3 {
+                    hash_algorithm,
+                    flags,
+                    iterations,
+                    salt_length,
+                    salt,
+                    hash_length,
+                    next_hashed_owner_name,
+                    type_bit_maps,
+                })
+            },
+            Kind::NSEC3PARAM => {
+                if rdata.len() < 6 {
+                    return Err(Error::Truncated);
+                }
+
+                let hash_algorithm = Algorithm(packet[offset]);
+                let flags = packet[offset+1];
+                let iterations = u16::from_be_bytes([packet[offset+2], packet[offset+3]]);
+                let salt_length = packet[offset+4];
+                let salt = &rdata[5..];
+
+                Ok(Record::NSEC3PARAM {
+                    hash_algorithm,
+                    flags,
+                    iterations,
+                    salt_length,
+                    salt
+                })
             },
             _ => Ok(Record::Raw(rdata)),
         }

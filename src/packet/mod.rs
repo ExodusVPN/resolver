@@ -183,8 +183,9 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> QueryBuilder<T> {
 
     pub fn build(&mut self) -> &[u8] {
         let qdcount = self.qdcount;
-        let opt_rr_exists = self.opt_rr_exists;
+        assert!(qdcount > 0, true);
 
+        let opt_rr_exists = self.opt_rr_exists;
         let mut hdr_pkt = self.header_pkt();
         hdr_pkt.set_qdcount(qdcount);
         hdr_pkt.set_ancount(0);

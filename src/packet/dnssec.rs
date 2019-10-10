@@ -28,100 +28,6 @@
 // Last Updated: 2017-03-10
 // 
 
-// DNS Security Algorithm Numbers
-// https://www.iana.org/assignments/dns-sec-alg-numbers/dns-sec-alg-numbers.xhtml#dns-sec-alg-numbers-1
-// 
-// [RFC4034] [RFC3755] [RFC6014] [RFC6944]
-// 
-// The KEY, SIG, DNSKEY, RRSIG, DS, and CERT RRs use an 8-bit number used
-// to identify the security algorithm being used.
-// 
-// All algorithm numbers in this registry may be used in CERT RRs. Zone
-// signing (DNSSEC) and transaction security mechanisms (SIG(0) and TSIG)
-// make use of particular subsets of these algorithms. Only algorithms
-// usable for zone signing may appear in DNSKEY, RRSIG, and DS RRs.
-// Only those usable for SIG(0) and TSIG may appear in SIG and KEY RRs.
-// 
-// * There has been no determination of standardization of the use of this
-// algorithm with Transaction Security.
-// 
-// Number   Description                     Mnemonic            ZoneSigning  Trans.Sec.    Reference 
-// 0        Delete DS                       DELETE              N               N          [RFC4034] [RFC4398] [RFC8078]
-// 1        RSA/MD5 (deprecated, see 5)     RSAMD5              N               Y          [RFC3110] [RFC4034]
-// 2        Diffie-Hellman                  DH                  N               Y          [RFC2539] [proposed standard]
-// 3        DSA/SHA1                        DSA                 Y               Y          [RFC3755] [proposed standard]
-//                                                                                         [RFC2536] [proposed standard]
-//                                                Federal Information Processing Standards Publication (FIPS PUB) 186, 
-//                                                Digital Signature Standard, 18 May 1994.
-//                                                Federal Information Processing Standards Publication (FIPS PUB) 180-1,
-//                                                Secure Hash Standard, 17 April 1995. 
-//                                                (Supersedes FIPS PUB 180 dated 11 May 1993.)
-// 4        Reserved                                                                       [RFC6725]
-// 5        RSA/SHA-1                       RSASHA1             Y               Y          [RFC3110] [RFC4034]
-// 6        DSA-NSEC3-SHA1                  DSA-NSEC3-SHA1      Y               Y          [RFC5155] [proposed standard]
-// 7        RSASHA1-NSEC3-SHA1              RSASHA1-NSEC3-SHA1  Y               Y          [RFC5155] [proposed standard]
-// 8        RSA/SHA-256                     RSASHA256           Y               *          [RFC5702] [proposed standard]
-// 9        Reserved                                                                       [RFC6725]
-// 10       RSA/SHA-512                     RSASHA512           Y               *          [RFC5702] [proposed standard]
-// 11       Reserved                                                                       [RFC6725]
-// 12       GOST R 34.10-2001               ECC-GOST            Y               *          [RFC5933] [standards track]
-// 13       ECDSA Curve P-256 with SHA-256  ECDSAP256SHA256     Y               *          [RFC6605] [standards track]
-// 14       ECDSA Curve P-384 with SHA-384  ECDSAP384SHA384     Y               *          [RFC6605] [standards track]
-// 15       Ed25519                         ED25519             Y               *          [RFC8080] [standards track]
-// 16       Ed448                           ED448               Y               *          [RFC8080] [standards track]
-// 17-122   Unassigned
-// 123-251  Reserved                                                                       [RFC4034] [RFC6014]
-// 252      Reserved for Indirect Keys      INDIRECT            N               N          [RFC4034] [proposed standard]
-// 253      private algorithm               PRIVATEDNS          Y               Y          [RFC4034]
-// 254      private algorithm OID           PRIVATEOID          Y               Y          [RFC4034]
-// 255      Reserved                                                                       [RFC4034] [proposed standard]
-
-// 算法推荐
-//    +--------+--------------------+-----------------+-------------------+
-//    | Number | Mnemonics          | DNSSEC Signing  | DNSSEC Validation |
-//    +--------+--------------------+-----------------+-------------------+
-//    | 1      | RSAMD5             | MUST NOT        | MUST NOT          |
-//    | 3      | DSA                | MUST NOT        | MUST NOT          |
-//    | 5      | RSASHA1            | NOT RECOMMENDED | MUST              |
-//    | 6      | DSA-NSEC3-SHA1     | MUST NOT        | MUST NOT          |
-//    | 7      | RSASHA1-NSEC3-SHA1 | NOT RECOMMENDED | MUST              |
-//    | 8      | RSASHA256          | MUST            | MUST              |
-//    | 10     | RSASHA512          | NOT RECOMMENDED | MUST              |
-//    | 12     | ECC-GOST           | MUST NOT        | MAY               |
-//    | 13     | ECDSAP256SHA256    | MUST            | MUST              |
-//    | 14     | ECDSAP384SHA384    | MAY             | RECOMMENDED       |
-//    | 15     | ED25519            | RECOMMENDED     | RECOMMENDED       |
-//    | 16     | ED448              | MAY             | RECOMMENDED       |
-//    +--------+--------------------+-----------------+-------------------+
-//  算法          签名         
-//    | 5      | RSASHA1            | NOT RECOMMENDED | MUST              |
-//    | 7      | RSASHA1-NSEC3-SHA1 | NOT RECOMMENDED | MUST              |
-//    | 8      | RSASHA256          | MUST            | MUST              |
-//    | 10     | RSASHA512          | NOT RECOMMENDED | MUST              |
-//    | 12     | ECC-GOST           | MUST NOT        | MAY               |
-//    | 13     | ECDSAP256SHA256    | MUST            | MUST              |
-//    | 14     | ECDSAP384SHA384    | MAY             | RECOMMENDED       |
-//    | 15     | ED25519            | RECOMMENDED     | RECOMMENDED       |
-//    | 16     | ED448              | MAY             | RECOMMENDED       |
-// 
-// 必须实现的算法
-// *    RSASHA256
-// *    ECDSAP256SHA256
-// 推荐实现的算法
-// *    ED25519
-// 兼容的算法 (因为部署广泛)
-// *    RSASHA1
-// *    RSASHA1-NSEC3-SHA1
-// *    
-// 
-// sha1            --> sha1::Sha1
-// sha256          --> sha2::Sha256
-// sha512          --> sha2::Sha512
-// ECDSAP256SHA256 --> 
-// ECDSAP384SHA384 --> 
-// ED25519         --> 
-// 
-// Ed25519 是一个使用SHA512/256和Curve25519的EdDSA签名算法
 bitflags! {
     pub struct DNSKEYFlags: u16 {
         // 2.1.1.  The Flags Field
@@ -172,8 +78,136 @@ impl DNSKEYFlags {
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub struct DNSKEYProtocol(pub u8);
 
+impl DNSKEYProtocol {
+    pub const V3: Self = Self(3);
+}
+
+// DNS Security Algorithm Numbers
+// https://www.iana.org/assignments/dns-sec-alg-numbers/dns-sec-alg-numbers.xhtml#dns-sec-alg-numbers-1
+// 
+// [RFC4034] [RFC3755] [RFC6014] [RFC6944]
+// 
+// The KEY, SIG, DNSKEY, RRSIG, DS, and CERT RRs use an 8-bit number used
+// to identify the security algorithm being used.
+// 
+// All algorithm numbers in this registry may be used in CERT RRs. Zone
+// signing (DNSSEC) and transaction security mechanisms (SIG(0) and TSIG)
+// make use of particular subsets of these algorithms. Only algorithms
+// usable for zone signing may appear in DNSKEY, RRSIG, and DS RRs.
+// Only those usable for SIG(0) and TSIG may appear in SIG and KEY RRs.
+// 
+// * There has been no determination of standardization of the use of this
+// algorithm with Transaction Security.
+// 
+// Number   Description                     Mnemonic            ZoneSigning  Trans.Sec.    Reference 
+// 0        Delete DS                       DELETE              N               N          [RFC4034] [RFC4398] [RFC8078]
+// 1        RSA/MD5 (deprecated, see 5)     RSAMD5              N               Y          [RFC3110] [RFC4034]
+// 2        Diffie-Hellman                  DH                  N               Y          [RFC2539] [proposed standard]
+// 3        DSA/SHA1                        DSA                 Y               Y          [RFC3755] [proposed standard]
+//                                                                                         [RFC2536] [proposed standard]
+//                                                Federal Information Processing Standards Publication (FIPS PUB) 186, 
+//                                                Digital Signature Standard, 18 May 1994.
+//                                                Federal Information Processing Standards Publication (FIPS PUB) 180-1,
+//                                                Secure Hash Standard, 17 April 1995. 
+//                                                (Supersedes FIPS PUB 180 dated 11 May 1993.)
+// 4        Reserved                                                                       [RFC6725]
+// 5        RSA/SHA-1                       RSASHA1             Y               Y          [RFC3110] [RFC4034]
+// 6        DSA-NSEC3-SHA1                  DSA-NSEC3-SHA1      Y               Y          [RFC5155] [proposed standard]
+// 7        RSASHA1-NSEC3-SHA1              RSASHA1-NSEC3-SHA1  Y               Y          [RFC5155] [proposed standard]
+// 8        RSA/SHA-256                     RSASHA256           Y               *          [RFC5702] [proposed standard]
+// 9        Reserved                                                                       [RFC6725]
+// 10       RSA/SHA-512                     RSASHA512           Y               *          [RFC5702] [proposed standard]
+// 11       Reserved                                                                       [RFC6725]
+// 12       GOST R 34.10-2001               ECC-GOST            Y               *          [RFC5933] [standards track]
+// 13       ECDSA Curve P-256 with SHA-256  ECDSAP256SHA256     Y               *          [RFC6605] [standards track]
+// 14       ECDSA Curve P-384 with SHA-384  ECDSAP384SHA384     Y               *          [RFC6605] [standards track]
+// 15       Ed25519                         ED25519             Y               *          [RFC8080] [standards track]
+// 16       Ed448                           ED448               Y               *          [RFC8080] [standards track]
+// 17-122   Unassigned
+// 123-251  Reserved                                                                       [RFC4034] [RFC6014]
+// 252      Reserved for Indirect Keys      INDIRECT            N               N          [RFC4034] [proposed standard]
+// 253      private algorithm               PRIVATEDNS          Y               Y          [RFC4034]
+// 254      private algorithm OID           PRIVATEOID          Y               Y          [RFC4034]
+// 255      Reserved                                                                       [RFC4034] [proposed standard]
+// 
+// 算法推荐
+//    +--------+--------------------+-----------------+-------------------+
+//    | Number | Mnemonics          | DNSSEC Signing  | DNSSEC Validation |
+//    +--------+--------------------+-----------------+-------------------+
+//    | 1      | RSAMD5             | MUST NOT        | MUST NOT          |
+//    | 3      | DSA                | MUST NOT        | MUST NOT          |
+//    | 5      | RSASHA1            | NOT RECOMMENDED | MUST              |
+//    | 6      | DSA-NSEC3-SHA1     | MUST NOT        | MUST NOT          |
+//    | 7      | RSASHA1-NSEC3-SHA1 | NOT RECOMMENDED | MUST              |
+//    | 8      | RSASHA256          | MUST            | MUST              |
+//    | 10     | RSASHA512          | NOT RECOMMENDED | MUST              |
+//    | 12     | ECC-GOST           | MUST NOT        | MAY               |
+//    | 13     | ECDSAP256SHA256    | MUST            | MUST              |
+//    | 14     | ECDSAP384SHA384    | MAY             | RECOMMENDED       |
+//    | 15     | ED25519            | RECOMMENDED     | RECOMMENDED       |
+//    | 16     | ED448              | MAY             | RECOMMENDED       |
+//    +--------+--------------------+-----------------+-------------------+
+// 
+// sha1            --> sha1::Sha1
+// sha256          --> sha2::Sha256
+// sha512          --> sha2::Sha512
+// ECDSAP256SHA256 --> 
+// ECDSAP384SHA384 --> 
+// ED25519         --> 
+// 
+// Ed25519 是一个使用SHA512/256和Curve25519的EdDSA签名算法
+// 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub struct Algorithm(pub u8);
+
+impl Algorithm {
+    pub const RSAMD5: Self             = Self(1);   // deprecated
+    pub const DSA: Self                = Self(3);   // deprecated
+    pub const RSASHA1: Self            = Self(5);   // MUST, 因为部署广泛, 需兼容
+    // DSA-NSEC3-SHA1
+    pub const DSA_NSEC3_SHA1: Self     = Self(6);   // deprecated
+    // RSASHA1-NSEC3-SHA1
+    pub const RSASHA1_NSEC3_SHA1: Self = Self(7);   // NOT RECOMMENDED, 因为部署广泛, 需兼容
+    pub const RSASHA256: Self          = Self(8);   // MUST
+    pub const RSASHA512: Self          = Self(10);  // NOT RECOMMENDED
+    // ECC-GOST
+    pub const ECC_GOST: Self           = Self(12);  // deprecated
+    pub const ECDSAP256SHA256: Self    = Self(13);  // MUST
+    pub const ECDSAP384SHA384: Self    = Self(14);  // MAY
+    pub const ED25519: Self            = Self(15);  // RECOMMENDED
+    pub const ED448: Self              = Self(16);  // MAY
+}
+
+// A.2.  DNSSEC Digest Types
+// https://tools.ietf.org/html/rfc4034#appendix-A.2
+// 2.  Implementing the SHA-256 Algorithm for DS Record Support
+// https://tools.ietf.org/html/rfc4509#section-2
+// 
+// VALUE   Algorithm                 STATUS
+//  0      Reserved                   -
+//  1      SHA-1                   MANDATORY
+// 2-255   Unassigned                 -
+// 
+//  2      SHA-256
+// 
+// A SHA-256 bit digest value calculated by using the following
+// formula ("|" denotes concatenation).  The resulting value is not
+// truncated, and the entire 32 byte result is to be used in the
+// resulting DS record and related calculations.
+// 
+//      digest = SHA_256(DNSKEY owner name | DNSKEY RDATA)
+// 
+// where DNSKEY RDATA is defined by [RFC4034] as:
+// 
+//      DNSKEY RDATA = Flags | Protocol | Algorithm | Public Key
+// 
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+pub struct DigestKind(pub u8);
+
+impl DigestKind {
+    pub const SHA1: Self    = Self(1); // 20 bytes
+    pub const SHA256: Self  = Self(2); // 32 bytes
+}
 
 
 pub fn verify() {

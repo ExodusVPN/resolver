@@ -34,7 +34,7 @@ fn main() -> Result<(), io::Error> {
 
     resolve(&mut conn, &domain_name)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Resolve Error: {:?}", e) ) )?;
-    
+
     Ok(())
 }
 
