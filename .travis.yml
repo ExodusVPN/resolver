@@ -1,0 +1,27 @@
+dist: bionic
+addons:
+  apt:
+    update: true
+    packages:
+    - libssl-dev
+# before_install:
+#   - sudo apt -y update
+#   - sudo apt -y install libssl-dev
+cache:
+  apt: true
+  cargo: true
+env:
+  - OPENSSL_STATIC=1
+
+language: rust
+rust:
+  - stable
+  - beta
+  - nightly
+matrix:
+  allow_failures:
+    - rust: nightly
+  fast_finish: true
+script:
+  - cargo build --all
+  - cargo test --all
