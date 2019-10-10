@@ -4,8 +4,10 @@ addons:
     update: true
     packages:
     - libssl-dev
+    - pkg-config
 # before_install:
 #   - sudo apt -y update
+#   - sudo apt -y install pkg-config
 #   - sudo apt -y install libssl-dev
 cache:
   apt: true
