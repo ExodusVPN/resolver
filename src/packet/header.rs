@@ -123,7 +123,7 @@ impl Flags {
     /// A four bit field that specifies kind of query in this message.
     /// This value is set by the originator of a query and copied into the response.
     pub fn opcode(&self) -> OpCode {
-        let bits = ((self.bits << 1)  >> 12) as u8;
+        let bits = ((self.bits << 1) >> 12) as u8;
         OpCode::new(bits)
     }
 
@@ -277,7 +277,7 @@ impl Flags {
     }
 
     pub fn set_rcode(&mut self, value: ResponseCode) {
-        let code = value.code() << 8;
+        let code = value.code() & 0b_0000_0000_0000_1111;
         self.bits &= 0b_1111_1111_1111_0000;
         self.bits |= code;
     }
