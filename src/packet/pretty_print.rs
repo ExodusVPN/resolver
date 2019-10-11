@@ -113,7 +113,7 @@ fn print_record_packet(ident: usize,
 
         let value = packet::Record::parse(*offset, &buffer, kind, class, rdata)?;
         
-        println!("{:ident$}📃 Name={} Kind={} Class={} TTL={} Value={:?}",
+        println!("{:ident$}📃 Name={} Kind={} Class={} TTL={} Value={}",
             EMPTY, name, kind, class, ttl, value, ident = ident);
 
         *offset += rdlen as usize;

@@ -146,7 +146,7 @@ pub enum Record<'a> {
         public_key: &'a str,
     },
     RRSIG {
-        type_covered: u16,
+        type_covered: Kind,
         algorithm: Algorithm,       //  8 bits
         labels: u8,
         original_ttl: u32,
@@ -395,7 +395,7 @@ impl<'a> Record<'a> {
 
                 let a = packet[offset];
                 let b = packet[offset+1];
-                let type_covered = u16::from_be_bytes([a, b]);
+                let type_covered = Kind(u16::from_be_bytes([a, b]));
                 let algorithm = Algorithm(packet[offset+2]);
                 let labels = packet[offset+3];
                 let original_ttl = u32::from_be_bytes([
@@ -532,4 +532,69 @@ impl<'a> Record<'a> {
             _ => Ok(Record::Raw(rdata)),
         }
     }
+}
+
+
+    
+    
+
+impl<'a> std::fmt::Display for Record<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self {
+            &Self::A(addr) => std::fmt::Display::fmt(&addr, f),
+            &Self::AAAA(addr) => std::fmt::Display::fmt(&addr, f),
+            &Self::CNAME(s) => std::fmt::Display::fmt(&s, f),
+            &Self::DNAME(s) => std::fmt::Display::fmt(&s, f),
+            &Self::TXT(s) => std::fmt::Display::fmt(s, f),
+            &Self::NS(s) => std::fmt::Display::fmt(s, f),
+            &Self::PTR(s) => std::fmt::Display::fmt(s, f),
+            &Self::HINFO { ref cpu, ref os } => {
+                write!(f, "cpu: {}, os:{}", cpu,
+                    match os {
+                        Some(ref os) => os,
+                        None => "N/A"
+                    })
+            },
+            &Self::MX { preference, exchange } => write!(f, "preference: {}, exchange: {}", preference, exchange),
+            &Self::SOA { mname, rname, serial, refresh, retry, expire, minimum } => {
+                write!(f, "mname: {}, rname: {}, serial: {}, refresh: {}, retry: {}, expire: {}, minimum: {}",
+                    mname, rname, serial, refresh, retry, expire, minimum)
+            },
+            &Self::Raw(data) => write!(f, "{:?}", data),
+            &Self::DNSKEY { flags, protocol, algorithm, public_key } => {
+                write!(f, "flags: {}, protocol: {}, algorithm: {}, public_key: {}", flags, protocol, algorithm, public_key)
+            },
+            &Self::RRSIG { type_covered, algorithm, labels, original_ttl, signature_expiration, signature_inception, key_tag, signer_name, signature } => {
+                write!(f, "type_covered: {}, algorithm: {}, labels: {}, original_ttl: {}, signature_expiration: {}, signature_inception: {}, key_tag: {}, signer_name: {}, signature: {:?}",
+                    type_covered, algorithm, labels, original_ttl, signature_expiration, signature_inception, 
+                    key_tag, signer_name, hexdigest(signature))
+            },
+            &Self::NSEC { next_domain_name, type_bit_maps } => {
+                write!(f, "next_domain_name: {}, type_bit_maps: {:?}", next_domain_name, hexdigest(type_bit_maps))
+            },
+            &Self::NSEC3 { hash_algorithm, flags, iterations, salt_length, salt, hash_length, next_hashed_owner_name, type_bit_maps} => {
+                write!(f, "hash_algorithm: {}, flags: {}, iterations: {}, salt_length: {}, salt: {:?}, hash_length: {}, next_hashed_owner_name: {:?}, type_bit_maps: {:?}",
+                hash_algorithm, flags, iterations, salt_length, hexdigest(salt), hash_length,
+                hexdigest(next_hashed_owner_name),
+                hexdigest(type_bit_maps))
+            },
+            &Self::NSEC3PARAM { hash_algorithm, flags, iterations, salt_length, salt } => {
+                write!(f, "hash_algorithm: {}, flags: {}, iterations: {}, salt_length: {}, salt: {:?}",
+                hash_algorithm, flags, iterations, salt_length, salt)
+            },
+            &Self::DS { key_tag, algorithm, digest_type, digest } => {
+                write!(f, "key_tag: {}, algorithm: {}, digest_type: {}, digest: {:?}",
+                    key_tag, algorithm, digest_type, hexdigest(digest))
+            },
+            _ => write!(f, "{:?}", self)
+        }
+    }
+}
+
+fn hexdigest(digest: &[u8]) -> String {
+    let mut s = String::from("0x");
+    for n in digest.iter() {
+        s.push_str(format!("{:02x}", n).as_ref());
+    }
+    s
 }

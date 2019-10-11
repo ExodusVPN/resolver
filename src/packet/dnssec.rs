@@ -72,6 +72,12 @@ impl DNSKEYFlags {
     }
 }
 
+impl std::fmt::Display for DNSKEYFlags {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 /// The Protocol Field MUST have value 3, and the DNSKEY RR MUST be
 /// treated as invalid during signature verification if it is found to be
 /// some value other than 3.
@@ -82,6 +88,14 @@ impl DNSKEYProtocol {
     pub const V3: Self = Self(3);
 }
 
+impl std::fmt::Display for DNSKEYProtocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Self::V3 => write!(f, "V3"),
+            _ => write!(f, "Unknow({})", self.0),
+        }
+    }
+}
 // DNS Security Algorithm Numbers
 // https://www.iana.org/assignments/dns-sec-alg-numbers/dns-sec-alg-numbers.xhtml#dns-sec-alg-numbers-1
 // 
@@ -178,6 +192,83 @@ impl Algorithm {
     pub const ED448: Self              = Self(16);  // MAY
 }
 
+impl Algorithm {
+    #[inline]
+    pub fn is_deprecated(&self) -> bool {
+        // 0        Delete DS                       DELETE              N               N          [RFC4034] [RFC4398] [RFC8078]
+        // 2        Diffie-Hellman                  DH                  N               Y          [RFC2539] [proposed standard]
+        match self.0 {
+            0 | 2 => true,
+            _ => false,
+        }
+    }
+
+    #[inline]
+    pub fn is_unassigned(&self) -> bool {
+        // 17-122   Unassigned
+        match self.0 {
+            17 ..= 122 => true,
+            _ => false,
+        }
+    }
+
+    #[inline]
+    pub fn is_private_use(&self) -> bool {
+        // 253      private algorithm               PRIVATEDNS          Y               Y          [RFC4034]
+        // 254      private algorithm OID           PRIVATEOID          Y               Y          [RFC4034]
+        match self.0 {
+            253 | 254 => true,
+            _ => false,
+        }
+    }
+
+    #[inline]
+    pub fn is_reserved(&self) -> bool {
+        // 4        Reserved                                                                       [RFC6725]
+        // 9        Reserved                                                                       [RFC6725]
+        // 11       Reserved                                                                       [RFC6725]
+        // 123-251  Reserved                                                                       [RFC4034] [RFC6014]
+        // 252      Reserved for Indirect Keys      INDIRECT            N               N          [RFC4034] [proposed standard]
+        // 255      Reserved                                                                       [RFC4034] [proposed standard]
+        match self.0 {
+            4 | 9 | 11 | 123 ..= 251 | 252 | 255 => true,
+            _ => false,
+        }
+    }
+}
+
+impl std::fmt::Display for Algorithm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Self::RSAMD5 => write!(f, "RSAMD5"),
+            Self::DSA => write!(f, "DSA"),
+            Self::RSASHA1 => write!(f, "RSASHA1"),
+            Self::DSA_NSEC3_SHA1 => write!(f, "DSA_NSEC3_SHA1"),
+            Self::RSASHA1_NSEC3_SHA1 => write!(f, "RSASHA1_NSEC3_SHA1"),
+            Self::RSASHA256 => write!(f, "RSASHA256"),
+            Self::RSASHA512 => write!(f, "RSASHA512"),
+            Self::ECC_GOST => write!(f, "ECC_GOST"),
+            Self::ECDSAP256SHA256 => write!(f, "ECDSAP256SHA256"),
+            Self::ECDSAP384SHA384 => write!(f, "ECDSAP384SHA384"),
+            Self::ED25519 => write!(f, "ED25519"),
+            Self::ED448 => write!(f, "ED448"),
+            _ => {
+                if self.is_deprecated() {
+                    write!(f, "Deprecated({})", self.0)
+                } else if self.is_unassigned() {
+                    write!(f, "Unassigned({})", self.0)
+                } else if self.is_private_use() {
+                    write!(f, "PrivateUse({})", self.0)
+                } else if self.is_reserved() {
+                    write!(f, "Reserved({})", self.0)
+                } else {
+                    write!(f, "Unknow({})", self.0)
+                }
+            },
+        }
+    }
+}
+
 // A.2.  DNSSEC Digest Types
 // https://tools.ietf.org/html/rfc4034#appendix-A.2
 // 2.  Implementing the SHA-256 Algorithm for DS Record Support
@@ -209,6 +300,15 @@ impl DigestKind {
     pub const SHA256: Self  = Self(2); // 32 bytes
 }
 
+impl std::fmt::Display for DigestKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Self::SHA1 => write!(f, "SHA1"),
+            Self::SHA256 => write!(f, "SHA256"),
+            _ => write!(f, "Unknow({})", self.0),
+        }
+    }
+}
 
 pub fn verify() {
 
