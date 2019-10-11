@@ -228,7 +228,7 @@ pub fn read_name<'a>(packet_offset: usize, packet: &'a [u8], output: &mut String
             0b11 => {
                 // Compressed label the lower 6 bits and the 8 bits from next octet form a pointer to the compression target.
                 // Standard    [RFC1035]
-                let index = u16::from_be_bytes([ label_len << 2, packet[offset+1] ]) as usize;
+                let index = u16::from_be_bytes([ label_len << 2 >> 2, packet[offset+1] ]) as usize;
                 
                 if index >= packet.len() {
                     return Err(Error::InvalidDomainNameLabel);
@@ -253,7 +253,7 @@ pub fn read_name<'a>(packet_offset: usize, packet: &'a [u8], output: &mut String
                 // 
                 // 5.  Extended Label Types
                 // https://tools.ietf.org/html/rfc6891#section-5
-                let ext_label_kind = label_len << 2;
+                let ext_label_kind = label_len << 2 >> 2;
                 match ext_label_kind {
                     0b00_0001 => {
                         // Binary Label     Historic    [RFC3364] [RFC3363] [RFC2673] [RFC6891]
