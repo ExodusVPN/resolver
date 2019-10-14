@@ -199,7 +199,7 @@ pub enum Record<'a> {
         flags: DNSKEYFlags,         // 16 bits
         protocol: DNSKEYProtocol,   //  8 bits
         algorithm: Algorithm,       //  8 bits
-        public_key: &'a str,
+        public_key: &'a [u8],
     },
     RRSIG {
         type_covered: Kind,
@@ -447,6 +447,25 @@ impl<'a> Record<'a> {
 
                 Ok(Record::SOA { mname, rname, serial, refresh, retry, expire, minimum })
             },
+            Kind::DNSKEY => {
+                if rdata.len() < 4 {
+                    return Err(Error::Truncated);
+                }
+
+                let a = packet[offset];
+                let b = packet[offset+1];
+                let flags = DNSKEYFlags::new_unchecked(u16::from_be_bytes([a, b]));
+                let protocol = DNSKEYProtocol(packet[offset+2]);
+                let algorithm = Algorithm(packet[offset+3]);
+                let public_key = &rdata[4..];
+
+                if protocol != DNSKEYProtocol::V3 {
+                    // protocol must be 0x03;
+
+                }
+
+                Ok(Record::DNSKEY { flags, protocol, algorithm, public_key })
+            },
             Kind::RRSIG => {
                 if rdata.len() < 19 {
                     return Err(Error::Truncated);
@@ -621,7 +640,8 @@ impl<'a> std::fmt::Display for Record<'a> {
             },
             &Self::Raw(data) => write!(f, "{:?}", data),
             &Self::DNSKEY { flags, protocol, algorithm, public_key } => {
-                write!(f, "flags: {}, protocol: {}, algorithm: {}, public_key: {}", flags, protocol, algorithm, public_key)
+                write!(f, "flags: {}, protocol: {}, algorithm: {}, public_key: {}", flags, protocol, algorithm,
+                    hexdigest(public_key))
             },
             &Self::RRSIG { type_covered, algorithm, labels, original_ttl, signature_expiration, signature_inception, key_tag, signer_name, signature } => {
                 write!(f, "type_covered: {}, algorithm: {}, labels: {}, original_ttl: {}, signature_expiration: {}, signature_inception: {}, key_tag: {}, signer_name: {}, signature: {:?}",
