@@ -22,12 +22,12 @@ use std::net::IpAddr;
 use std::collections::HashMap;
 
 
-pub const BUFFER_SIZE: usize = 1024 * 64 - 1; // 64K
+pub const MAX_BUFFER_SIZE: usize = crate::MAXIMUM_TCP_MESSAGES_SIZE + 2; // 加上 2 Bytes 的消息长度
 
 
 #[inline]
-pub fn alloc() -> [u8; BUFFER_SIZE] {
-    [0u8; BUFFER_SIZE]
+pub fn alloc() -> [u8; MAX_BUFFER_SIZE] {
+    [0u8; MAX_BUFFER_SIZE]
 }
 
 pub fn write_dnssec_and_ecs(offset: usize, buffer: &mut [u8], addr: IpAddr, prefix_len: u8) -> Result<usize, Error> {
@@ -46,7 +46,7 @@ pub fn write_dnssec_and_ecs(offset: usize, buffer: &mut [u8], addr: IpAddr, pref
     buffer[offset] = 0; // Name: . (ROOT)
     let mut pkt = ExtensionPacket::new_unchecked(&mut buffer[offset + 1..]);
     pkt.set_kind(Kind::OPT);
-    pkt.set_udp_size(BUFFER_SIZE as u16);
+    pkt.set_udp_size(MAX_BUFFER_SIZE as u16);
     pkt.set_rcode(0);
     pkt.set_version(EXT_HEADER_V0);
     pkt.set_flags(ExtensionFlags::DO);
@@ -75,7 +75,7 @@ pub fn write_dnssec(offset: usize, buffer: &mut [u8]) -> Result<usize, Error> {
     buffer[offset] = 0; // Name: . (ROOT)
     let mut pkt = ExtensionPacket::new_unchecked(&mut buffer[offset + 1..]);
     pkt.set_kind(Kind::OPT);
-    pkt.set_udp_size(BUFFER_SIZE as u16);
+    pkt.set_udp_size(MAX_BUFFER_SIZE as u16);
     pkt.set_rcode(0);
     pkt.set_version(EXT_HEADER_V0);
     pkt.set_flags(ExtensionFlags::DO);
@@ -197,6 +197,77 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> QueryBuilder<T> {
         let data = self.buffer.as_ref();
 
         &data[..self.len]
+    }
+}
+
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
+pub struct AsciiStr<'a> {
+    inner: &'a [u8],
+}
+
+impl<'a> AsciiStr<'a> {
+    pub const fn new(inner: &'a [u8]) -> Self {
+        AsciiStr { inner }
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        self.inner
+    }
+    
+    pub fn utf16_len(&self) -> usize {
+        self.len() * 2
+    }
+
+    pub fn utf8_len(&self) -> usize {
+        let mut len = 0usize;
+        for n in self.inner.iter() {
+            if *n < 128 {
+                len += 1;
+            } else {
+                len += 2;
+            }
+        }
+        len
+    }
+
+    pub fn encode_utf8(&self, b: &mut [u8]) -> usize {
+        let mut buffer = [0u8; 4];
+        let mut amt = 0usize;
+        
+        for n in self.inner.iter() {
+            let s = (*n as char).encode_utf8(&mut b[amt..]);
+            amt += s.len();
+        }
+
+        amt
+    }
+}
+
+impl<'a> std::fmt::Debug for AsciiStr<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut buffer = [0u8; 4];
+        f.write_str("\"")?;
+        for n in self.inner.iter() {
+            let s = (*n as char).encode_utf8(&mut buffer);
+            f.write_str(s)?;
+        }
+        f.write_str("\"")?;
+        Ok(())
+    }
+}
+
+impl<'a> std::fmt::Display for AsciiStr<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut buffer = [0u8; 4];
+        for n in self.inner.iter() {
+            let s = (*n as char).encode_utf8(&mut buffer);
+            f.write_str(s)?;
+        }
+        Ok(())
     }
 }
 

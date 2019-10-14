@@ -1,15 +1,17 @@
 use crate::error::Error;
 
-use crate::packet::Kind;
-use crate::packet::Class;
-use crate::packet::Flags;
-use crate::packet::read_name;
-use crate::packet::OptionCode;
-use crate::packet::AddressFamily;
-use crate::packet::DNSKEYProtocol;
-use crate::packet::DNSKEYFlags;
-use crate::packet::Algorithm;
-use crate::packet::DigestKind;
+use crate::wire::Kind;
+use crate::wire::Class;
+use crate::wire::Flags;
+use crate::wire::read_name;
+use crate::wire::OptionCode;
+use crate::wire::AddressFamily;
+use crate::wire::DNSKEYProtocol;
+use crate::wire::DNSKEYFlags;
+use crate::wire::Algorithm;
+use crate::wire::DigestKind;
+use crate::wire::AsciiStr;
+use crate::wire::ExtensionFlags;
 
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -31,12 +33,66 @@ pub enum OptionValue<'a> {
     Raw(&'a [u8]),
 }
 
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub struct ClientSubnet2 {
+    pub src_prefix_len: u8,
+    pub scope_prefix_len: u8,
+    pub address: IpAddr,
+}
+
+pub enum ExtensionValue {
+    None,
+    ClientSubnet(ClientSubnet2),
+}
+
+// OPT Resource Record
+pub struct Extension {
+    // kind: Kind, // OPT
+    udp_size: u16,
+    rcode: u8,
+    version: u8,
+    flags: ExtensionFlags,
+    value: ExtensionValue,
+}
+
+pub struct Response {
+    extension: Option<Extension>,
+}
+
+// Normal Resource Record
+pub struct Record2<'a, N: AsRef<str>> {
+    name: N,
+    kind: Kind,
+    class: Class,
+    ttl: u32,
+    value: Value<'a>,
+}
+
+pub struct RecordRepr<'a, N: AsRef<str>> {
+    pub name: N,
+    pub kind: Kind,
+    pub class: Class,
+    pub ttl: u32,
+    pub value: Value<'a>,
+}
+
+// pub fn parse<T: AsRef<[u8]> + ?Sized>(frame: &Frame<&T>) -> Result<Repr>    [src]
+// Parse an Ethernet II frame and return a high-level representation.
+// pub fn buffer_len(&self) -> usize   [src]
+// Return the length of a header that will be emitted from this high-level representation.
+// pub fn emit<T: AsRef<[u8]> + AsMut<[u8]>>(&self, frame: &mut Frame<T>)  [src]
+// Emit a high-level representation into an Ethernet II frame.
+
+pub static HINFO_CPU: &'static str = "RFC8482";
+
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum Value<'a> {
     V4(Ipv4Addr),
     V6(Ipv6Addr),
     String(String),
     Str(&'a str),
+    // AsciiStr(AsciiStr<'a>),
     HINFO {
         cpu: String,        // The CPU field of the HINFO RDATA SHOULD be set to "RFC8482".
         os: Option<String>, // The OS field of the HINFO RDATA SHOULD be set to the null string to minimize the size of the response.
@@ -122,7 +178,7 @@ pub enum Record<'a> {
     // 
     // Using the Domain Name System To Store Arbitrary String Attributes
     // https://tools.ietf.org/html/rfc1464
-    TXT(&'a str),
+    TXT(AsciiStr<'a>),
     // 3.3.9. MX RDATA format
     // https://tools.ietf.org/html/rfc1035#section-3.3.9
     MX {
@@ -323,6 +379,9 @@ impl<'a> Record<'a> {
                 let _amt = read_name(offset, packet, &mut cname, 0)?;
 
                 Ok(Record::PTR(cname))
+            },
+            Kind::TXT => {
+                Ok(Record::TXT(AsciiStr::new(rdata)))
             },
             Kind::NS => {
                 let mut ns = String::new();

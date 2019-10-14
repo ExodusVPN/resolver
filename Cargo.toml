@@ -7,12 +7,16 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bitflags = "1.2"
-punycode = "0.4"
-base64   = "0.10"
-openssl  = "0.10"
+log        = "0.4"
+bitflags   = "1.2"
+punycode   = "0.4"
+base64     = "0.10"
+openssl    = "0.10"
+native-tls = "0.2"
+lru        = "0.3"
+mio        = { version = "0.6", optional = true }
 
 [features]
-default  = [ ]
+default  = [ "mio" ]
 nightly  = [ ]
 vendored = [ "openssl/vendored" ]

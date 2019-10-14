@@ -1,6 +1,6 @@
 use crate::error::Error;
-use crate::packet::OpCode;
-use crate::packet::ResponseCode;
+use crate::wire::OpCode;
+use crate::wire::ResponseCode;
 
 
 pub const HEADER_SIZE: usize = 12;

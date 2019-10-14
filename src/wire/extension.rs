@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::packet::Kind;
+use crate::wire::Kind;
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 

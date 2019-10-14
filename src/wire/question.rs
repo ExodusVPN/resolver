@@ -1,6 +1,6 @@
 use crate::error::Error;
-use crate::packet::Kind;
-use crate::packet::Class;
+use crate::wire::Kind;
+use crate::wire::Class;
 
 
 // 4.1.2. Question section format

@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::packet;
+use crate::wire;
 
 const EMPTY: &str = "";
 
@@ -18,7 +18,7 @@ fn print_record_packet(ident: usize,
                        buffer: &[u8],
                        offset: &mut usize,
                        name: &mut String,
-                       header_rcode: &mut packet::ResponseCode,
+                       header_rcode: &mut wire::ResponseCode,
                        opt_record_count: &mut usize,
                        dnssec_ok: &mut bool,
                        is_query: bool) -> Result<(), Error> {
@@ -27,12 +27,12 @@ fn print_record_packet(ident: usize,
         name.clear();
     }
 
-    let amt = packet::read_name(*offset, &buffer, name, 0)?;
+    let amt = wire::read_name(*offset, &buffer, name, 0)?;
     *offset += amt;
 
-    let rr = packet::RecordPacket::new_checked(&buffer[*offset..])?;
+    let rr = wire::RecordPacket::new_checked(&buffer[*offset..])?;
     let kind = rr.kind();
-    if kind == packet::Kind::OPT {
+    if kind == wire::Kind::OPT {
         if name != "" {
             // Name must be empty (root).
             return Err(Error::Unrecognized);
@@ -43,7 +43,7 @@ fn print_record_packet(ident: usize,
             return Err(Error::Unrecognized);
         }
 
-        let ext_rr = packet::ExtensionPacket::new_checked(&buffer[*offset..])?;
+        let ext_rr = wire::ExtensionPacket::new_checked(&buffer[*offset..])?;
         let udp_size = ext_rr.udp_size();
         let ext_rcode = ext_rr.rcode();
         let ext_version = ext_rr.version();
@@ -58,11 +58,11 @@ fn print_record_packet(ident: usize,
         let ecs = if rdlen == 0 {
             None
         } else {
-            let opt_data = packet::ExtensionDataPacket::new_checked(rdata)?;
+            let opt_data = wire::ExtensionDataPacket::new_checked(rdata)?;
             let opt_code = opt_data.option_code();
             let opt_length = opt_data.option_length();
-            let ecs = if opt_code == packet::OptionCode::EDNS_CLIENT_SUBNET {
-                Some(packet::ClientSubnetPacket::new_checked(opt_data.option_data())?)
+            let ecs = if opt_code == wire::OptionCode::EDNS_CLIENT_SUBNET {
+                Some(wire::ClientSubnetPacket::new_checked(opt_data.option_data())?)
             } else {
                 None
             };
@@ -96,7 +96,7 @@ fn print_record_packet(ident: usize,
         
         if ext_rcode > 0 {
             // The original header flags has been extended.
-            let new_header_rcode = packet::ResponseCode::new(((ext_rcode as u16) << 8) | header_rcode.code());
+            let new_header_rcode = wire::ResponseCode::new(((ext_rcode as u16) << 8) | header_rcode.code());
             println!("{:ident$}⚠️  The original header rcode has been extended: {} --> {}",
                 EMPTY, header_rcode, new_header_rcode, ident = ident);
             *header_rcode = new_header_rcode;
@@ -111,7 +111,7 @@ fn print_record_packet(ident: usize,
 
         *offset += rr.header_len();
 
-        let value = packet::Record::parse(*offset, &buffer, kind, class, rdata)?;
+        let value = wire::Record::parse(*offset, &buffer, kind, class, rdata)?;
         
         println!("{:ident$}📃 Name={} Kind={} Class={} TTL={} Value={}",
             EMPTY, name, kind, class, ttl, value, ident = ident);
@@ -126,7 +126,7 @@ fn pprint(ident: usize, buffer: &[u8]) -> Result<(), Error> {
     let mut offset = 0usize;
     let mut name = String::new();
 
-    let hdr = packet::HeaderPacket::new_checked(buffer)?;
+    let hdr = wire::HeaderPacket::new_checked(buffer)?;
     let id = hdr.id();
     
     let flags = hdr.flags();
@@ -169,10 +169,10 @@ fn pprint(ident: usize, buffer: &[u8]) -> Result<(), Error> {
     // Question Section
     for _ in 0..qdcount {
         name.clear();
-        let amt = packet::read_name(offset, &buffer, &mut name, 0)?;
+        let amt = wire::read_name(offset, &buffer, &mut name, 0)?;
         offset += amt;
 
-        let question = packet::QuestionPacket::new_checked(&buffer[offset..])?;
+        let question = wire::QuestionPacket::new_checked(&buffer[offset..])?;
         offset += question.len();
 
         println!("{:ident$}🔎 Name={} Kind={} Class={}",

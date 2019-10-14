@@ -171,6 +171,11 @@ impl std::fmt::Display for DNSKEYProtocol {
 // 
 // Ed25519 是一个使用SHA512/256和Curve25519的EdDSA签名算法
 // 
+// Elliptic Curve Digital Signature Algorithm (DSA) for DNSSEC
+// https://tools.ietf.org/html/rfc6605
+// 
+// https://csrc.nist.gov/csrc/media/publications/fips/186/3/archive/2009-06-25/documents/fips_186-3.pdf
+
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub struct Algorithm(pub u8);
 
@@ -300,12 +305,30 @@ impl DigestKind {
     pub const SHA256: Self  = Self(2); // 32 bytes
 }
 
+impl DigestKind {
+    #[inline]
+    pub fn is_unassigned(&self) -> bool {
+        // 0
+        // 3 .. 255
+        match self.0 {
+            0 | 3 ..= 255 => true,
+            _ => false,
+        }
+    }
+}
+
 impl std::fmt::Display for DigestKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
             Self::SHA1 => write!(f, "SHA1"),
             Self::SHA256 => write!(f, "SHA256"),
-            _ => write!(f, "Unknow({})", self.0),
+            _ => {
+                if self.is_unassigned() {
+                    write!(f, "Unassigned({})", self.0)
+                } else {
+                    write!(f, "Unknow({})", self.0)
+                }
+            },
         }
     }
 }
