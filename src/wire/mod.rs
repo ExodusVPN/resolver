@@ -1,5 +1,8 @@
 use crate::error::Error;
 
+mod builder;
+mod digest;
+mod cidr;
 mod name;
 mod header;
 mod question;
@@ -7,8 +10,10 @@ mod answer;
 mod record;
 mod extension;
 mod dnssec;
-mod pretty_print;
 
+pub use self::builder::*;
+pub use self::digest::*;
+pub use self::cidr::*;
 pub use self::name::*;
 pub use self::header::*;
 pub use self::question::*;
@@ -16,7 +21,6 @@ pub use self::answer::*;
 pub use self::record::*;
 pub use self::extension::*;
 pub use self::dnssec::*;
-pub use self::pretty_print::*;
 
 use std::net::IpAddr;
 use std::collections::HashMap;
@@ -200,78 +204,6 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> QueryBuilder<T> {
     }
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy)]
-pub struct AsciiStr<'a> {
-    inner: &'a [u8],
-}
-
-impl<'a> AsciiStr<'a> {
-    pub const fn new(inner: &'a [u8]) -> Self {
-        AsciiStr { inner }
-    }
-
-    pub fn len(&self) -> usize {
-        self.inner.len()
-    }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        self.inner
-    }
-    
-    pub fn utf16_len(&self) -> usize {
-        self.len() * 2
-    }
-
-    pub fn utf8_len(&self) -> usize {
-        let mut len = 0usize;
-        for n in self.inner.iter() {
-            if *n < 128 {
-                len += 1;
-            } else {
-                len += 2;
-            }
-        }
-        len
-    }
-
-    pub fn encode_utf8(&self, b: &mut [u8]) -> usize {
-        let mut buffer = [0u8; 4];
-        let mut amt = 0usize;
-        
-        for n in self.inner.iter() {
-            let s = (*n as char).encode_utf8(&mut b[amt..]);
-            amt += s.len();
-        }
-
-        amt
-    }
-}
-
-impl<'a> std::fmt::Debug for AsciiStr<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut buffer = [0u8; 4];
-        f.write_str("\"")?;
-        for n in self.inner.iter() {
-            let s = (*n as char).encode_utf8(&mut buffer);
-            f.write_str(s)?;
-        }
-        f.write_str("\"")?;
-        Ok(())
-    }
-}
-
-impl<'a> std::fmt::Display for AsciiStr<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut buffer = [0u8; 4];
-        for n in self.inner.iter() {
-            let s = (*n as char).encode_utf8(&mut buffer);
-            f.write_str(s)?;
-        }
-        Ok(())
-    }
-}
-
-
 // 4. MESSAGES
 // 4.1. Format
 // https://tools.ietf.org/html/rfc1035#section-4
@@ -296,7 +228,7 @@ impl<'a> std::fmt::Display for AsciiStr<'a> {
 
 // 16 Bits
 /// two octets containing one of the RR TYPE codes. 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 pub struct Kind(pub u16);
 
 impl Kind {
@@ -487,6 +419,20 @@ impl Kind {
     /// DNSSEC Lookaside Validation     RFC4431
     pub const DLV: Self   = Self(32769);
 
+    #[inline]
+    pub fn is_pseudo_record_kind(&self) -> bool {
+        // Other types and pseudo resource records
+        // https://en.wikipedia.org/wiki/List_of_DNS_record_types#Other_types_and_pseudo_resource_records
+        // 
+        // *        255     RFC 1035[1]     All cached records 
+        // AXFR     252     RFC 1035[1]     Authoritative Zone Transfer 
+        // IXFR     251     RFC 1996        Incremental Zone Transfer
+        // OPT      41      RFC 6891        Option 
+        match *self {
+            Self::ALL | Self::AXFR | Self::IXFR | Self::OPT => true,
+            _ => false,
+        }
+    }
 
     #[inline]
     pub fn is_unassigned(&self) -> bool {
@@ -520,7 +466,7 @@ impl Kind {
     }
 }
 
-impl std::fmt::Display for Kind {
+impl std::fmt::Debug for Kind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             &Kind::A => write!(f, "A"),
@@ -539,7 +485,6 @@ impl std::fmt::Display for Kind {
             &Kind::MINFO => write!(f, "MINFO"),
             &Kind::MX => write!(f, "MX"),
             &Kind::TXT => write!(f, "TXT"),
-
             &Kind::RP => write!(f, "RP"),
             &Kind::AFSDB => write!(f, "AFSDB"),
             &Kind::X25 => write!(f, "X25"),
@@ -584,7 +529,6 @@ impl std::fmt::Display for Kind {
             &Kind::OPENPGPKEY => write!(f, "OPENPGPKEY"),
             &Kind::CSYNC => write!(f, "CSYNC"),
             &Kind::ZONEMD => write!(f, "ZONEMD"),
-
             &Kind::SPF => write!(f, "SPF"),
             &Kind::UINFO => write!(f, "UINFO"),
             &Kind::UID => write!(f, "UID"),
@@ -596,11 +540,9 @@ impl std::fmt::Display for Kind {
             &Kind::LP => write!(f, "LP"),
             &Kind::EUI48 => write!(f, "EUI48"),
             &Kind::EUI64 => write!(f, "EUI64"),
-
             &Kind::TKEY => write!(f, "TKEY"),
             &Kind::TSIG => write!(f, "TSIG"),
             &Kind::IXFR => write!(f, "IXFR"),
-            
             &Kind::AXFR => write!(f, "AXFR"),
             &Kind::MAILB => write!(f, "MAILB"),
             &Kind::MAILA => write!(f, "MAILA"),
@@ -628,6 +570,106 @@ impl std::fmt::Display for Kind {
     }
 }
 
+impl std::fmt::Display for Kind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::str::FromStr for Kind {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "A" => Ok(Kind::A),
+            "NS" => Ok(Kind::NS),
+            "MD" => Ok(Kind::MD),
+            "MF" => Ok(Kind::MF),
+            "CNAME" => Ok(Kind::CNAME),
+            "SOA" => Ok(Kind::SOA),
+            "MB" => Ok(Kind::MB),
+            "MG" => Ok(Kind::MG),
+            "MR" => Ok(Kind::MR),
+            "NULL" => Ok(Kind::NULL),
+            "WKS" => Ok(Kind::WKS),
+            "PTR" => Ok(Kind::PTR),
+            "HINFO" => Ok(Kind::HINFO),
+            "MINFO" => Ok(Kind::MINFO),
+            "MX" => Ok(Kind::MX),
+            "TXT" => Ok(Kind::TXT),
+            "RP" => Ok(Kind::RP),
+            "AFSDB" => Ok(Kind::AFSDB),
+            "X25" => Ok(Kind::X25),
+            "ISDN" => Ok(Kind::ISDN),
+            "RT" => Ok(Kind::RT),
+            "NSAP" => Ok(Kind::NSAP),
+            "NSAP-PTR" => Ok(Kind::NSAP_PTR),
+            "SIG" => Ok(Kind::SIG),
+            "KEY" => Ok(Kind::KEY),
+            "PX" => Ok(Kind::PX),
+            "GPOS" => Ok(Kind::GPOS),
+            "AAAA" => Ok(Kind::AAAA),
+            "LOC" => Ok(Kind::LOC),
+            "NXT" => Ok(Kind::NXT),
+            "EID" => Ok(Kind::EID),
+            "NIMLOC" => Ok(Kind::NIMLOC),
+            "SRV" => Ok(Kind::SRV),
+            "ATMA" => Ok(Kind::ATMA),
+            "NAPTR" => Ok(Kind::NAPTR),
+            "KX" => Ok(Kind::KX),
+            "DNAME" => Ok(Kind::DNAME),
+            "SINK" => Ok(Kind::SINK),
+            "OPT" => Ok(Kind::OPT),
+            "APL" => Ok(Kind::APL),
+            "DS" => Ok(Kind::DS),
+            "SSHFP" => Ok(Kind::SSHFP),
+            "IPSECKEY" => Ok(Kind::IPSECKEY),
+            "RRSIG" => Ok(Kind::RRSIG),
+            "NSEC" => Ok(Kind::NSEC),
+            "DNSKEY" => Ok(Kind::DNSKEY),
+            "DHCID" => Ok(Kind::DHCID),
+            "NSEC3" => Ok(Kind::NSEC3),
+            "NSEC3PARAM" => Ok(Kind::NSEC3PARAM),
+            "TLSA" => Ok(Kind::TLSA),
+            "SMIMEA" => Ok(Kind::SMIMEA),
+            "HIP" => Ok(Kind::HIP),
+            "NINFO" => Ok(Kind::NINFO),
+            "RKEY" => Ok(Kind::RKEY),
+            "TALINK" => Ok(Kind::TALINK),
+            "CDS" => Ok(Kind::CDS),
+            "CDNSKEY" => Ok(Kind::CDNSKEY),
+            "OPENPGPKEY" => Ok(Kind::OPENPGPKEY),
+            "CSYNC" => Ok(Kind::CSYNC),
+            "ZONEMD" => Ok(Kind::ZONEMD),
+            "SPF" => Ok(Kind::SPF),
+            "UINFO" => Ok(Kind::UINFO),
+            "UID" => Ok(Kind::UID),
+            "GID" => Ok(Kind::GID),
+            "UNSPEC" => Ok(Kind::UNSPEC),
+            "NID" => Ok(Kind::NID),
+            "L32" => Ok(Kind::L32),
+            "L64" => Ok(Kind::L64),
+            "LP" => Ok(Kind::LP),
+            "EUI48" => Ok(Kind::EUI48),
+            "EUI64" => Ok(Kind::EUI64),
+            "TKEY" => Ok(Kind::TKEY),
+            "TSIG" => Ok(Kind::TSIG),
+            "IXFR" => Ok(Kind::IXFR),
+            "AXFR" => Ok(Kind::AXFR),
+            "MAILB" => Ok(Kind::MAILB),
+            "MAILA" => Ok(Kind::MAILA),
+            "ALL" => Ok(Kind::ALL),
+            "URI" => Ok(Kind::URI),
+            "CAA" => Ok(Kind::CAA),
+            "AVC" => Ok(Kind::AVC),
+            "DOA" => Ok(Kind::DOA),
+            "AMTRELAY" => Ok(Kind::AMTRELAY),
+            "TA" => Ok(Kind::TA),
+            "DLV" => Ok(Kind::DLV),
+            _ => Err(Error::Unrecognized),
+        }
+    }
+}
 
 // 0        0x0000  Reserved    [RFC6895]
 // 1        0x0001  Internet (IN)   [RFC1035]
@@ -643,7 +685,7 @@ impl std::fmt::Display for Kind {
 // 
 // 16 Bits
 /// two octets containing one of the RR CLASS codes.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub struct Class(pub u16);
 
 impl Class {
@@ -729,7 +771,7 @@ impl Class {
     }
 }
 
-impl std::fmt::Display for Class {
+impl std::fmt::Debug for Class {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let class = if self.is_unicast() { self.class() } else { *self };
 
@@ -755,11 +797,32 @@ impl std::fmt::Display for Class {
     }
 }
 
+impl std::fmt::Display for Class {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::str::FromStr for Class {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "IN"   => Ok(Self::IN),
+            "CS"   => Ok(Self::CS),
+            "CH"   => Ok(Self::CH),
+            "HS"   => Ok(Self::HS),
+            "NONE" => Ok(Self::NONE),
+            "ANY"  => Ok(Self::ANY),
+            _      => Err(Error::Unrecognized),
+        }
+    }
+}
 
 // 4 Bits
 /// A four bit field that specifies kind of query in this message.
 /// This value is set by the originator of a query and copied into the response.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub struct OpCode(u8);
 
 impl OpCode {
@@ -810,7 +873,7 @@ impl OpCode {
     }
 }
 
-impl std::fmt::Display for OpCode {
+impl std::fmt::Debug for OpCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             &Self::QUERY => write!(f, "QUERY"),
@@ -827,6 +890,12 @@ impl std::fmt::Display for OpCode {
                 }
             },
         }
+    }
+}
+
+impl std::fmt::Display for OpCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
@@ -861,7 +930,7 @@ impl std::fmt::Display for OpCode {
 
 // 8 Bits + 4 Bits
 /// Response code - this 4 bit field is set as part of responses.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub struct ResponseCode(u16);
 
 impl ResponseCode {
@@ -939,6 +1008,23 @@ impl ResponseCode {
     }
 
     #[inline]
+    pub fn hi(&self) -> u8 {
+        // 8 bits
+        ((self.0 >> 4) & 0b_0000_0000_1111_1111) as u8
+    }
+
+    #[inline]
+    pub fn lo(&self) -> u8 {
+        // 4 bits
+        (self.0 & 0b_0000_0000_0000_1111) as u8
+    }
+
+    #[inline]
+    pub fn extend_hi(&mut self, hi: u8) {
+        self.0 |= ((hi as u16) << 4)
+    }
+
+    #[inline]
     pub fn is_ok(&self) -> bool {
         *self == Self::OK
     }
@@ -1002,7 +1088,7 @@ impl ResponseCode {
     }
 }
 
-impl std::fmt::Display for ResponseCode {
+impl std::fmt::Debug for ResponseCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             &Self::OK => write!(f, "OK"),
@@ -1033,5 +1119,11 @@ impl std::fmt::Display for ResponseCode {
                 }
             },
         }
+    }
+}
+
+impl std::fmt::Display for ResponseCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
     }
 }

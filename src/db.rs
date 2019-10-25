@@ -1,5 +1,16 @@
+use crate::wire;
 
+use std::fs;
+use std::io;
+use std::path;
+use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+// https://tools.ietf.org/html/rfc952
+#[cfg(unix)]
+pub const HOSTS_FILE_PATH: &str = "/etc/hosts";
+#[cfg(windows)]
+pub const HOSTS_FILE_PATH: &str = "C:\\Windows\\System32\\Drivers\\etc\\hosts";
 
 // https://www.iana.org/domains/root/db/com.html
 // 
@@ -86,3 +97,49 @@ pub const BEST_ROOT_IPV6_NAME_SERVER: Ipv6Addr = Ipv6Addr::new(0x2001, 0x0500, 0
 // L: Asia/Yangon
 // IPv4    199.7.83.42
 // IPv6    2001:500:9f::42
+
+pub fn load_root_zone<P: AsRef<path::Path>>(filepath: P) -> Result<HashMap<String, Vec<()>>, io::Error> {
+    let root_zone_file = fs::read_to_string(filepath)?;
+    for line in root_zone_file.lines() {
+
+    }
+    
+    unimplemented!();
+}
+
+pub fn load_hosts<P: AsRef<path::Path>>(filepath: P) -> Result<HashMap<String, IpAddr>, io::Error> {
+    let hosts_file = fs::read_to_string(filepath)?;
+    let mut hosts = HashMap::new();
+
+    for line in hosts_file.lines() {
+        let mut val = line.trim();
+        if val.starts_with("#") {
+            continue;
+        }
+
+        if val.contains('#') {
+            val = val.split('#').next().unwrap();
+        }
+
+        let tmp = val.split(' ').collect::<Vec<&str>>();
+        if tmp.len() < 2 {
+            debug!("invalid host line: {:?}", val);
+            continue
+        }
+
+        let addr_str = tmp[0];
+        match addr_str.parse::<IpAddr>() {
+            Ok(addr) => {
+                for hostname in &tmp[1..] {
+                    let name = hostname.trim().to_string();
+                    hosts.insert(name, addr);
+                }
+            },
+            Err(_) => {
+                debug!("invalid IP address syntax: {}", addr_str);
+            }
+        }
+    }
+
+    Ok(hosts)
+}

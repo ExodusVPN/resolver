@@ -1,147 +1,244 @@
+use chrono::TimeZone;
+
 use crate::error::Error;
-
+use crate::wire;
 use crate::wire::Kind;
-use crate::wire::Class;
-use crate::wire::Flags;
-use crate::wire::read_name;
-use crate::wire::OptionCode;
-use crate::wire::AddressFamily;
-use crate::wire::DNSKEYProtocol;
-use crate::wire::DNSKEYFlags;
-use crate::wire::Algorithm;
-use crate::wire::DigestKind;
-use crate::wire::AsciiStr;
-use crate::wire::ExtensionFlags;
 
-
+use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct SOA {
+    pub mname: String,
+    pub rname: String,
+    pub serial: u32,
+    pub refresh: i32,
+    pub retry: i32,
+    pub expire: i32,
+    pub minimum: u32,
+}
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct MX {
+    pub preference: i16,
+    pub exchange: String,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct DNSKEY {
+    pub flags: wire::DNSKEYFlags,         // 16 bits
+    pub protocol: wire::DNSKEYProtocol,   //  8 bits
+    pub algorithm: wire::Algorithm,       //  8 bits
+    pub public_key: wire::Digest<Vec<u8>>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct RRSIG {
+    pub type_covered: wire::Kind,
+    pub algorithm: wire::Algorithm,       //  8 bits
+    pub labels: u8,
+    pub original_ttl: u32,
+    pub signature_expiration: u32,
+    pub signature_inception: u32,
+    pub key_tag: u16,
+    pub signer_name: String,
+    pub signature: wire::Digest<Vec<u8>>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct NSEC {
+    pub next_domain_name: String,
+    pub type_bit_maps: Vec<wire::Kind>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct NSEC3 {
+    pub hash_algorithm: wire::Algorithm,
+    pub flags: wire::NSEC3Flags,
+    pub iterations: u16,
+    pub salt_length: u8,
+    pub salt: wire::Digest<Vec<u8>>,
+    pub hash_length: u8,
+    pub next_hashed_owner_name: wire::Digest<Vec<u8>>, // It is the unmodified binary hash value.
+    pub type_bit_maps: Vec<wire::Kind>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct NSEC3PARAM {
+    pub hash_algorithm: wire::Algorithm,
+    pub flags: u8,
+    pub iterations: u16,
+    pub salt_length: u8,
+    pub salt: wire::Digest<Vec<u8>>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct DS {
+    pub key_tag: u16,
+    pub algorithm: wire::Algorithm,
+    pub digest_type: wire::DigestKind,
+    pub digest: wire::Digest<Vec<u8>>,
+}
+
+// 5.1.1.  Canonical Presentation Format
+// https://tools.ietf.org/html/rfc6844#section-5.1.1
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct CAA {
+    // Is an unsigned integer between 0 and 255.
+    // 
+    // 7.3.  Certification Authority Restriction Flags
+    // https://tools.ietf.org/html/rfc6844#section-7.3
+    // 
+    // Flag         Meaning                            Reference
+    // -----------  ---------------------------------- ---------
+    // 0            Issuer Critical Flag               [RFC6844]
+    // 1-7          Reserved>                          [RFC6844]
+    pub flags: u8,
+    // Is a non-zero sequence of US-ASCII letters and numbers in lower case.
+    // 
+    // 7.2.  Certification Authority Restriction Properties
+    // https://tools.ietf.org/html/rfc6844#section-7.2
+    // 
+    // Tag          Meaning                                Reference
+    // -----------  -------------------------------------- ---------
+    // issue        Authorization Entry by Domain          [RFC6844]
+    // issuewild    Authorization Entry by Wildcard Domain [RFC6844]
+    // iodef        Report incident by IODEF report        [RFC6844]
+    // auth         Reserved                               [HB2011]
+    // path         Reserved                               [HB2011]
+    // policy       Reserved                               [HB2011]
+    pub tag: String,
+    // Is the <character-string> encoding of the value field as specified in [RFC1035], Section 5.1.
+    pub value: String,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ClientSubnet {
-    pub address_family: AddressFamily,
     pub src_prefix_len: u8,
     pub scope_prefix_len: u8,
     pub address: IpAddr,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub enum OptionValue<'a> {
+impl std::fmt::Display for ClientSubnet {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "CLIENT={}/{} SCOPED={}/{}",
+            self.address, self.src_prefix_len, self.address, self.scope_prefix_len)
+    }
+}
+
+impl<R: Into<wire::IpCidr>> From<R> for ClientSubnet {
+    fn from(cidr: R) -> Self {
+        let cidr = cidr.into();
+        let addr = cidr.address();
+        let prefix_len = cidr.prefix_len();
+
+        ClientSubnet {
+            src_prefix_len: prefix_len,
+            scope_prefix_len: 0,
+            address: addr,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum OptValue {
     None,
-    ClientSubnet(ClientSubnet),
-    Raw(&'a [u8]),
+    ECS(ClientSubnet),
 }
 
-
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub struct ClientSubnet2 {
-    pub src_prefix_len: u8,
-    pub scope_prefix_len: u8,
-    pub address: IpAddr,
+// 6.1.  OPT Record Definition
+// https://tools.ietf.org/html/rfc6891#section-6.1
+// 
+// DNS EDNS0 Option Codes (OPT)
+// https://www.iana.org/assignments/dns-parameters/dns-parameters.xhtml#dns-parameters-11
+// 
+// https://tools.ietf.org/html/rfc3225#section-3
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct OPT {
+    pub udp_size: u16,
+    pub rcode: u8,
+    pub version: u8,
+    pub flags: wire::ExtensionFlags,
+    pub value: OptValue,
 }
 
-pub enum ExtensionValue {
-    None,
-    ClientSubnet(ClientSubnet2),
+/// Resource Record Value
+#[derive(PartialEq, Eq, Clone)]
+pub enum Value {
+    A(Ipv4Addr),
+    AAAA(Ipv6Addr),
+    // 3.3.13. SOA RDATA format
+    // https://tools.ietf.org/html/rfc1035#section-3.3.13
+    SOA(SOA),
+    // 3.3.9. MX RDATA format
+    // https://tools.ietf.org/html/rfc1035#section-3.3.9
+    MX(MX),
+    // 3.3.11. NS RDATA format
+    // https://tools.ietf.org/html/rfc1035#section-3.3.11
+    NS(String),
+    CNAME(String),
+    // DNAME Redirection in the DNS
+    // https://tools.ietf.org/html/rfc6672
+    DNAME(String),
+    // https://tools.ietf.org/html/rfc1035#section-3.3.14
+    // 
+    // Using the Domain Name System To Store Arbitrary String Attributes
+    // https://tools.ietf.org/html/rfc1464
+    TXT(String),  // WARN: ascii extended characters
+
+    // 5.1.  DS RDATA Wire Format
+    // https://tools.ietf.org/html/rfc4034#section-5.1
+    DS(DS),
+    // 4.  The NSEC Resource Record
+    // https://tools.ietf.org/html/rfc4034#page-12
+    NSEC(NSEC),
+    // 3.  The NSEC3 Resource Record
+    // https://tools.ietf.org/html/rfc5155#section-3.2
+    NSEC3(NSEC3),
+    // 4.2.  NSEC3PARAM RDATA Wire Format
+    // https://tools.ietf.org/html/rfc5155#page-13
+    NSEC3PARAM(NSEC3PARAM),
+    // 3.  The RRSIG Resource Record
+    // https://tools.ietf.org/html/rfc4034#section-3
+    RRSIG(RRSIG),
+    // https://tools.ietf.org/html/rfc4034
+    DNSKEY(DNSKEY),
+
+    // 5.1.1.  Canonical Presentation Format
+    // https://tools.ietf.org/html/rfc6844#section-5.1.1
+    CAA(CAA),
+    
+    // OPT(OPT),
+
+    // 4.2.  Answer with a Synthesized HINFO RRset
+    // https://tools.ietf.org/html/rfc8482#section-4.2
+    // 
+    // The CPU field of the HINFO RDATA SHOULD be set to "RFC8482".
+    // The OS field of the HINFO RDATA SHOULD be set to the null string to minimize the size of the response.
+    // 
+    // Note: 当客户端发起 Class=ANY 的查询时，必须要要返回该 Record.
+    // HINFO,
 }
 
-// OPT Resource Record
-pub struct Extension {
-    // kind: Kind, // OPT
-    udp_size: u16,
-    rcode: u8,
-    version: u8,
-    flags: ExtensionFlags,
-    value: ExtensionValue,
-}
-
-pub struct Response {
-    extension: Option<Extension>,
-}
-
-// Normal Resource Record
-pub struct Record2<'a, N: AsRef<str>> {
-    name: N,
-    kind: Kind,
-    class: Class,
-    ttl: u32,
-    value: Value<'a>,
-}
-
-pub struct RecordRepr<'a, N: AsRef<str>> {
-    pub name: N,
-    pub kind: Kind,
-    pub class: Class,
-    pub ttl: u32,
-    pub value: Value<'a>,
-}
-
-// pub fn parse<T: AsRef<[u8]> + ?Sized>(frame: &Frame<&T>) -> Result<Repr>    [src]
-// Parse an Ethernet II frame and return a high-level representation.
-// pub fn buffer_len(&self) -> usize   [src]
-// Return the length of a header that will be emitted from this high-level representation.
-// pub fn emit<T: AsRef<[u8]> + AsMut<[u8]>>(&self, frame: &mut Frame<T>)  [src]
-// Emit a high-level representation into an Ethernet II frame.
-
-pub static HINFO_CPU: &'static str = "RFC8482";
-
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub enum Value<'a> {
-    V4(Ipv4Addr),
-    V6(Ipv6Addr),
-    String(String),
-    Str(&'a str),
-    // AsciiStr(AsciiStr<'a>),
-    HINFO {
-        cpu: String,        // The CPU field of the HINFO RDATA SHOULD be set to "RFC8482".
-        os: Option<String>, // The OS field of the HINFO RDATA SHOULD be set to the null string to minimize the size of the response.
-    },
-    MX {
-        preference: i16,
-        exchange: String,
-    },
-    OPT {
-        code: OptionCode,      // EXTENDED-RCODE
-        // length: u16,
-        // data: &'a [u8],
-        value: OptionValue<'a>,
-    },
-    SOA {
-        mname: String,
-        rname: String,
-        serial: u32,
-        refresh: i32,
-        retry: i32,
-        expire: i32,
-        minimum: u32,
-    },
-    Raw(&'a [u8]),
-}
-
-impl<'a> std::fmt::Display for Value<'a> {
+impl std::fmt::Debug for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self {
-            &Self::V4(addr) => std::fmt::Display::fmt(&addr, f),
-            &Self::V6(addr) => std::fmt::Display::fmt(&addr, f),
-            &Self::String(s) => std::fmt::Display::fmt(&s, f),
-            &Self::Str(s) => std::fmt::Display::fmt(s, f),
-            &Self::HINFO { ref cpu, ref os } => {
-                write!(f, "cpu: {}, os:{}", cpu,
-                    match os {
-                        Some(ref os) => os,
-                        None => "N/A"
-                    })
-            },
-            &Self::MX { preference, exchange } => write!(f, "preference: {}, exchange: {}", preference, exchange),
-            &Self::OPT { code, value } => {
-                write!(f, "code={}", code)
-            },
-            &Self::SOA { mname, rname, serial, refresh, retry, expire, minimum } => {
-                write!(f, "mname: {}, rname: {}, serial: {}, refresh: {}, retry: {}, expire: {}, minimum: {}",
-                    mname, rname, serial, refresh, retry, expire, minimum)
-            },
-            &Self::Raw(data) => write!(f, "{:?}", data),
+        match self {
+            Self::A(addr) => write!(f, "A({:?})", addr),
+            Self::AAAA(addr) => write!(f, "AAAA({:?})", addr),
+            Self::SOA(v) => write!(f, "{:?}", v),
+            Self::MX(v) => write!(f, "{:?}", v),
+            Self::NS(v) => write!(f, "NS({:?})", v),
+            Self::CNAME(v) => write!(f, "CNAME({:?})", v),
+            Self::DNAME(v) => write!(f, "DNAME({:?})", v),
+            Self::TXT(v) => write!(f, "TXT({:?})", v),
+            Self::DS(v) => write!(f, "{:?}", v),
+            Self::NSEC(v) => write!(f, "{:?}", v),
+            Self::NSEC3(v) => write!(f, "{:?}", v),
+            Self::NSEC3PARAM(v) => write!(f, "{:?}", v),
+            Self::RRSIG(v) => write!(f, "{:?}", v),
+            Self::DNSKEY(v) => write!(f, "{:?}", v),
+            Self::CAA(v) => write!(f, "{:?}", v),
         }
     }
 }
@@ -152,528 +249,1117 @@ impl<'a> std::fmt::Display for Value<'a> {
 // 
 // List_of_DNS_record_types
 // https://en.wikipedia.org/wiki/List_of_DNS_record_types
-
-// Apart from the new DNS server and client concepts, 
-// DNSSEC introduced to the DNS the following 4 new resource records: DNSKEY, RRSIG, NSEC and DS. 
-
-/// resource record value
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub enum Record<'a> {
-    A(Ipv4Addr),
-    AAAA(Ipv6Addr),
-    CNAME(String),
-    // DNAME Redirection in the DNS
-    // https://tools.ietf.org/html/rfc6672
-    DNAME(String),
-    // 4.2.  Answer with a Synthesized HINFO RRset
-    // https://tools.ietf.org/html/rfc8482#section-4.2
-    // 
-    // Note: 当客户端发起 Class=ANY 的查询时，必须要要返回该 Record.
-    //       
-    HINFO {
-        cpu: String,        // The CPU field of the HINFO RDATA SHOULD be set to "RFC8482".
-        os: Option<String>, // The OS field of the HINFO RDATA SHOULD be set to the null string to minimize the size of the response.
-    },
-    // https://tools.ietf.org/html/rfc1035#section-3.3.14
-    // 
-    // Using the Domain Name System To Store Arbitrary String Attributes
-    // https://tools.ietf.org/html/rfc1464
-    TXT(AsciiStr<'a>),
-    // 3.3.9. MX RDATA format
-    // https://tools.ietf.org/html/rfc1035#section-3.3.9
-    MX {
-        preference: i16,
-        exchange: String,
-    },
-    // 3.3.11. NS RDATA format
-    // https://tools.ietf.org/html/rfc1035#section-3.3.11
-    NS(String),
-    
-    // 3.3.12. PTR RDATA format
-    // https://tools.ietf.org/html/rfc1035#section-3.3.12
-    PTR(String),
-
-    // TODO:
-    // https://tools.ietf.org/html/rfc4034
-    DNSKEY {
-        flags: DNSKEYFlags,         // 16 bits
-        protocol: DNSKEYProtocol,   //  8 bits
-        algorithm: Algorithm,       //  8 bits
-        public_key: &'a [u8],
-    },
-    RRSIG {
-        type_covered: Kind,
-        algorithm: Algorithm,       //  8 bits
-        labels: u8,
-        original_ttl: u32,
-        signature_expiration: u32,
-        signature_inception: u32,
-        key_tag: u16,
-        signer_name: String,
-        signature: &'a [u8],
-    },
-    // 4.  The NSEC Resource Record
-    // https://tools.ietf.org/html/rfc4034#page-12
-    NSEC {
-        next_domain_name: String,
-        type_bit_maps: &'a [u8],
-    },
-    // 3.  The NSEC3 Resource Record
-    // https://tools.ietf.org/html/rfc5155#section-3.2
-    NSEC3 {
-        hash_algorithm: Algorithm,
-        // https://tools.ietf.org/html/rfc5155#section-3.2
-        // 
-        // Flags field is a single octet, the Opt-Out flag is the least
-        // significant bit, as shown below:
-        // 
-        // 0 1 2 3 4 5 6 7
-        // +-+-+-+-+-+-+-+-+
-        // |             |O|
-        // +-+-+-+-+-+-+-+-+
-        flags: u8,
-        iterations: u16,
-        salt_length: u8,
-        salt: &'a [u8],
-        hash_length: u8,
-        // It is the unmodified binary hash value.
-        next_hashed_owner_name: &'a [u8],
-        // 3.2.1.  Type Bit Maps Encoding
-        // https://tools.ietf.org/html/rfc5155#section-3.2.1
-        type_bit_maps: &'a [u8],
-    },
-
-    // 4.2.  NSEC3PARAM RDATA Wire Format
-    // https://tools.ietf.org/html/rfc5155#section-4.2
-    NSEC3PARAM {
-        hash_algorithm: Algorithm,
-        flags: u8,
-        iterations: u16,
-        salt_length: u8,
-        salt: &'a [u8],
-    },
-
-    // 5.1.  DS RDATA Wire Format
-    // https://tools.ietf.org/html/rfc4034#section-5.1
-    DS {
-        key_tag: u16,
-        algorithm: Algorithm,
-        // A.2.  DNSSEC Digest Types
-        // https://tools.ietf.org/html/rfc4034#appendix-A.2
-        // 2.  Implementing the SHA-256 Algorithm for DS Record Support
-        // https://tools.ietf.org/html/rfc4509#section-2
-        // 
-        // VALUE   Algorithm                 STATUS
-        //  0      Reserved                   -
-        //  1      SHA-1                   MANDATORY
-        // 2-255   Unassigned                 -
-        // 
-        //  2      SHA-256
-        // 
-        // A SHA-256 bit digest value calculated by using the following
-        // formula ("|" denotes concatenation).  The resulting value is not
-        // truncated, and the entire 32 byte result is to be used in the
-        // resulting DS record and related calculations.
-        // 
-        //      digest = SHA_256(DNSKEY owner name | DNSKEY RDATA)
-        // 
-        // where DNSKEY RDATA is defined by [RFC4034] as:
-        // 
-        //      DNSKEY RDATA = Flags | Protocol | Algorithm | Public Key
-        // 
-        digest_type: DigestKind,
-        digest: &'a [u8],
-    },
-        
-
-    // DLV,
-    // KEY,
-    // KX,
-    // CDNSKEY
-    // CDS
-    // 
-
-    // 6.1.  OPT Record Definition
-    // https://tools.ietf.org/html/rfc6891#section-6.1
-    // 
-    // DNS EDNS0 Option Codes (OPT)
-    // https://www.iana.org/assignments/dns-parameters/dns-parameters.xhtml#dns-parameters-11
-    // 
-    // https://tools.ietf.org/html/rfc3225#section-3
-    OPT {
-        // EXTENDED-RCODE
-        // ext_rcode: u8,
-        code: u16,
-        length: u16,
-        data: &'a [u8],
-    },
-    // 
-    // 3.3.13. SOA RDATA format
-    // https://tools.ietf.org/html/rfc1035#section-3.3.13
-    SOA {
-        mname: String,
-        rname: String,
-        serial: u32,
-        refresh: i32,
-        retry: i32,
-        expire: i32,
-        minimum: u32,
-    },
-
-    // A DNS RR for specifying the location of services (DNS SRV)
-    // https://tools.ietf.org/html/rfc2782
-    // SRV,
-    
-    Raw(&'a [u8]),
+/// Resource Record
+#[derive(PartialEq, Eq, Clone)]
+pub struct Record {
+    pub name: String,
+    pub kind: wire::Kind,
+    pub class: wire::Class,
+    pub ttl: u32,
+    pub value: Value,
 }
 
-impl<'a> Record<'a> {
-    pub fn parse(offset: usize,
-                 packet: &[u8],
-                 kind: Kind,
-                 _class: Class,
-                 rdata: &'a [u8]) -> Result<Record<'a>, Error> {
-        match kind {
-            Kind::A => {
-                if rdata.len() < 4 {
-                    return Err(Error::Truncated);
-                }
+impl Record {
+    pub fn serialize(&self, offset: &mut usize, name_dict: &mut HashMap<u64, u16>, buffer: &mut [u8]) -> Result<usize, Error> {
+        let begin = *offset;
 
-                let a = rdata[0];
-                let b = rdata[1];
-                let c = rdata[2];
-                let d = rdata[3];
+        let amt = wire::write_name(&self.name, *offset, buffer, name_dict)?;
+        *offset += amt;
 
-                Ok(Record::A(Ipv4Addr::new(a, b, c, d)))
+        let mut pkt = wire::RecordPacket::new_unchecked(&mut buffer[*offset..]);
+        pkt.set_kind(self.kind);
+        pkt.set_class(self.class);
+        pkt.set_ttl(self.ttl);
+
+        let start = *offset + 8 + 2;
+        let mut rdlen = 0usize;
+
+        match &self.value {
+            &Value::A(ref v) => {
+                let rdata = &mut buffer[start..];
+                let octets = v.octets();
+                rdata[0] = octets[0];
+                rdata[1] = octets[1];
+                rdata[2] = octets[2];
+                rdata[3] = octets[3];
+                rdlen += 4;
             },
-            Kind::AAAA => {
-                if rdata.len() < 16 {
-                    return Err(Error::Truncated);
-                }
-
-                let mut octets = [0u8; 16];
-                &mut octets.copy_from_slice(&rdata[..16]);
-
-                Ok(Record::AAAA(Ipv6Addr::from(octets)))
+            &Value::AAAA(ref v) => {
+                let rdata = &mut buffer[start..];
+                let octets = v.octets();
+                (&mut rdata[..16]).copy_from_slice(&octets);
+                rdlen += 16;
             },
-            Kind::CNAME => {
-                let mut cname = String::new();
-                let _amt = read_name(offset, packet, &mut cname, 0)?;
+            &Value::SOA(ref v) => {
+                let amt = wire::write_name(&v.mname, start, buffer, name_dict)?;
+                rdlen += amt;
+                let amt = wire::write_name(&v.rname, start + amt, buffer, name_dict)?;
+                rdlen += amt;
 
-                Ok(Record::CNAME(cname))
+                let rdata = &mut buffer[start..];
+                (&mut rdata[rdlen..rdlen+4]).copy_from_slice(&v.serial.to_be_bytes());
+                rdlen += 4;
+                (&mut rdata[rdlen..rdlen+4]).copy_from_slice(&v.refresh.to_be_bytes());
+                rdlen += 4;
+                (&mut rdata[rdlen..rdlen+4]).copy_from_slice(&v.retry.to_be_bytes());
+                rdlen += 4;
+                (&mut rdata[rdlen..rdlen+4]).copy_from_slice(&v.expire.to_be_bytes());
+                rdlen += 4;
+                (&mut rdata[rdlen..rdlen+4]).copy_from_slice(&v.minimum.to_be_bytes());
+                rdlen += 4;
             },
-            Kind::HINFO => {
-                // TEST: cargo run --example dig ns3.cloudflare.com:53 cloudflare.com
-                const DEFAULT_HINFO: &[u8] = &[7, 82, 70, 67, 56, 52, 56, 50, 0]; // RFC8482
-                if rdata != DEFAULT_HINFO {
-                    return Err(Error::InvalidHinfoRecord);
-                }
-
-                let mut cpu = String::new();
-                let _amt = read_name(offset, packet, &mut cpu, 0)?;
-
-                Ok(Record::HINFO { cpu, os: None } )
+            &Value::MX(ref v) => {
+                let rdata = &mut buffer[start..];
+                (&mut rdata[rdlen..rdlen+2]).copy_from_slice(&v.preference.to_be_bytes());
+                rdlen += 2;
+                let amt = wire::write_name(&v.exchange, start + 2, buffer, name_dict)?;
+                rdlen += amt;
             },
-            Kind::PTR => {
-                let mut cname = String::new();
-                let _amt = read_name(offset, packet, &mut cname, 0)?;
-
-                Ok(Record::PTR(cname))
+            &Value::NS(ref v) => {
+                let amt = wire::write_name(&v, start, buffer, name_dict)?;
+                rdlen += amt;
             },
-            Kind::TXT => {
-                Ok(Record::TXT(AsciiStr::new(rdata)))
+            &Value::CNAME(ref v) => {
+                let amt = wire::write_name(&v, start, buffer, name_dict)?;
+                rdlen += amt;
             },
-            Kind::NS => {
-                let mut ns = String::new();
-                let _amt = read_name(offset, packet, &mut ns, 0)?;
-                Ok(Record::NS(ns))
+            &Value::DNAME(ref v) => {
+                let amt = wire::write_name(&v, start, buffer, name_dict)?;
+                rdlen += amt;
             },
-            Kind::MX => {
-                let a = rdata[0];
-                let b = rdata[1];
-                let preference = i16::from_be_bytes([a, b]);
-
-                let mut exchange = String::new();
-                let _amt = read_name(offset, packet, &mut exchange, 0)?;
-
-                Ok(Record::MX { preference, exchange })
+            &Value::TXT(ref v) => {
+                assert!(v.is_ascii());
+                let rdata = &mut buffer[start..];
+                (&mut rdata[rdlen..rdlen+v.len()]).copy_from_slice(&v.as_bytes());
+                rdlen += v.len();
             },
-            Kind::SOA => {
-                let mut mname = String::new();
-                let amt = read_name(offset, packet, &mut mname, 0)?;
+            &Value::DS(ref v) => {
+                let rdata = &mut buffer[start..];
+                (&mut rdata[rdlen..rdlen+2]).copy_from_slice(&v.key_tag.to_be_bytes());
+                rdlen += 2;
 
-                let mut rname = String::new();
-                let amt2 = read_name(offset + amt, packet, &mut rname, 0)?;
+                rdata[rdlen] = v.algorithm.0;
+                rdlen += 1;
 
-                let start = amt + amt2;
-                let serial = u32::from_be_bytes([
-                    rdata[start + 0],
-                    rdata[start + 1],
-                    rdata[start + 2],
-                    rdata[start + 3],
-                ]);
-
-                let start = start + 4;
-                let refresh = i32::from_be_bytes([
-                    rdata[start + 0],
-                    rdata[start + 1],
-                    rdata[start + 2],
-                    rdata[start + 3],
-                ]);
-
-                let start = start + 4;
-                let retry = i32::from_be_bytes([
-                    rdata[start + 0],
-                    rdata[start + 1],
-                    rdata[start + 2],
-                    rdata[start + 3],
-                ]);
-
-                let start = start + 4;
-                let expire = i32::from_be_bytes([
-                    rdata[start + 0],
-                    rdata[start + 1],
-                    rdata[start + 2],
-                    rdata[start + 3],
-                ]);
-
-                let start = start + 4;
-                let minimum = u32::from_be_bytes([
-                    rdata[start + 0],
-                    rdata[start + 1],
-                    rdata[start + 2],
-                    rdata[start + 3],
-                ]);
-
-                Ok(Record::SOA { mname, rname, serial, refresh, retry, expire, minimum })
-            },
-            Kind::DNSKEY => {
-                if rdata.len() < 4 {
-                    return Err(Error::Truncated);
-                }
-
-                let a = packet[offset];
-                let b = packet[offset+1];
-                let flags = DNSKEYFlags::new_unchecked(u16::from_be_bytes([a, b]));
-                let protocol = DNSKEYProtocol(packet[offset+2]);
-                let algorithm = Algorithm(packet[offset+3]);
-                let public_key = &rdata[4..];
-
-                if protocol != DNSKEYProtocol::V3 {
-                    // protocol must be 0x03;
-
-                }
-
-                Ok(Record::DNSKEY { flags, protocol, algorithm, public_key })
-            },
-            Kind::RRSIG => {
-                if rdata.len() < 19 {
-                    return Err(Error::Truncated);
-                }
-
-                let a = packet[offset];
-                let b = packet[offset+1];
-                let type_covered = Kind(u16::from_be_bytes([a, b]));
-                let algorithm = Algorithm(packet[offset+2]);
-                let labels = packet[offset+3];
-                let original_ttl = u32::from_be_bytes([
-                    packet[offset+4],
-                    packet[offset+5],
-                    packet[offset+6],
-                    packet[offset+7],
-                ]);
-                let signature_expiration = u32::from_be_bytes([
-                    packet[offset+8],
-                    packet[offset+9],
-                    packet[offset+10],
-                    packet[offset+11],
-                ]);
-                let signature_inception = u32::from_be_bytes([
-                    packet[offset+12],
-                    packet[offset+13],
-                    packet[offset+14],
-                    packet[offset+15],
-                ]);
-                let key_tag = u16::from_be_bytes([
-                    packet[offset+16],
-                    packet[offset+17],
-                ]);
-
-                let mut signer_name = String::new();
-                let _amt = read_name(offset+18, packet, &mut signer_name, 0)?;
+                rdata[rdlen] = v.digest_type.0;
+                rdlen += 1;
                 
-                if rdata.len() < 19 + _amt {
-                    return Err(Error::Truncated);
-                }
-
-                let signature = &rdata[18+_amt..];
-
-                Ok(Record::RRSIG {
-                    type_covered,
-                    algorithm,
-                    labels,
-                    original_ttl,
-                    signature_expiration,
-                    signature_inception,
-                    key_tag,
-                    signer_name,
-                    signature,
-                })
+                (&mut rdata[rdlen..rdlen+v.digest.len()]).copy_from_slice(&v.digest.as_bytes());
+                rdlen += v.digest.len();
             },
-            Kind::DS => {
-                if rdata.len() < 5 {
-                    return Err(Error::Truncated);
-                }
+            &Value::NSEC(ref v) => {
+                let amt = wire::write_name(&v.next_domain_name, start, buffer, name_dict)?;
+                rdlen += amt;
 
-                let key_tag = u16::from_be_bytes([packet[offset], packet[offset+1]]);
-                let algorithm = Algorithm(packet[offset+2]);
-                // 1      SHA-1                   MANDATORY
-                // 2      SHA-256
-                let digest_type = DigestKind(packet[offset+3]);
-                let digest = &rdata[4..];
+                let rdata = &mut buffer[start..];
 
-                Ok(Record::DS {
-                    key_tag,
-                    algorithm,
-                    digest_type,
-                    digest,
-                })
+                let mut type_bit_maps = v.type_bit_maps.clone();
+                let type_bit_maps_len = encode_type_bit_maps(&mut type_bit_maps, &mut rdata[rdlen..])?;
+                rdlen += type_bit_maps_len;
+
+                // (&mut rdata[rdlen..rdlen+v.type_bit_maps.len()]).copy_from_slice(&v.type_bit_maps);
+                // rdlen += v.type_bit_maps.len();
             },
-            Kind::NSEC => {
-                let mut next_domain_name = String::new();
-                let _amt = read_name(offset, packet, &mut next_domain_name, 0)?;
-                if rdata.len() < _amt {
-                    return Err(Error::Truncated);
-                }
-                let type_bit_maps = &rdata[_amt..];
+            &Value::NSEC3(ref v) => {
+                let rdata = &mut buffer[start..];
+                rdata[rdlen] = v.hash_algorithm.0;
+                rdlen += 1;
+                
+                rdata[rdlen] = v.flags.bits();
+                rdlen += 1;
+                
+                (&mut rdata[rdlen..rdlen+2]).copy_from_slice(&v.iterations.to_be_bytes());
+                rdlen += 2;
 
-                Ok(Record::NSEC {
+                rdata[rdlen] = v.salt_length;
+                rdlen += 1;
+                
+                (&mut rdata[rdlen..rdlen+v.salt.len()]).copy_from_slice(&v.salt.as_bytes());
+                rdlen += v.salt.len();
+                
+                rdata[rdlen] = v.hash_length;
+                rdlen += 1;
+                
+                (&mut rdata[rdlen..rdlen+v.next_hashed_owner_name.len()]).copy_from_slice(&v.next_hashed_owner_name.as_bytes());
+                rdlen += v.next_hashed_owner_name.len();
+                
+                let mut type_bit_maps = v.type_bit_maps.clone();
+                let type_bit_maps_len = encode_type_bit_maps(&mut type_bit_maps, &mut rdata[rdlen..])?;
+                rdlen += type_bit_maps_len;
+
+                // (&mut rdata[rdlen..rdlen+v.type_bit_maps.len()]).copy_from_slice(&v.type_bit_maps);
+                // rdlen += v.type_bit_maps.len();
+            },
+            &Value::NSEC3PARAM(ref v) => {
+                let rdata = &mut buffer[start..];
+                rdata[rdlen] = v.hash_algorithm.0;
+                rdlen += 1;
+
+                rdata[rdlen] = v.flags;
+                rdlen += 1;
+
+                (&mut rdata[rdlen..rdlen+2]).copy_from_slice(&v.iterations.to_be_bytes());
+                rdlen += 2;
+
+                rdata[rdlen] = v.salt_length;
+                rdlen += 1;
+                
+                (&mut rdata[rdlen..rdlen+v.salt.len()]).copy_from_slice(&v.salt.as_bytes());
+                rdlen += v.salt.len();
+            },
+            &Value::RRSIG(ref v) => {
+                let rdata = &mut buffer[start..];
+
+                (&mut rdata[rdlen..rdlen+2]).copy_from_slice(&v.type_covered.0.to_be_bytes());
+                rdlen += 2;
+
+                rdata[rdlen] = v.algorithm.0;
+                rdlen += 1;
+
+                rdata[rdlen] = v.labels;
+                rdlen += 1;
+                
+                (&mut rdata[rdlen..rdlen+4]).copy_from_slice(&v.original_ttl.to_be_bytes());
+                rdlen += 4;
+
+                (&mut rdata[rdlen..rdlen+4]).copy_from_slice(&v.signature_expiration.to_be_bytes());
+                rdlen += 4;
+                
+                (&mut rdata[rdlen..rdlen+4]).copy_from_slice(&v.signature_inception.to_be_bytes());
+                rdlen += 4;
+
+                (&mut rdata[rdlen..rdlen+2]).copy_from_slice(&v.key_tag.to_be_bytes());
+                rdlen += 2;
+
+                let amt = wire::write_name(&v.signer_name, start + rdlen as usize, buffer, name_dict)?;
+                rdlen += amt;
+
+                let rdata = &mut buffer[start..];
+                (&mut rdata[rdlen..rdlen+v.signature.len()]).copy_from_slice(&v.signature.as_bytes());
+                rdlen += v.signature.len();
+            },
+            &Value::DNSKEY(ref v) => {
+                let rdata = &mut buffer[start..];
+                (&mut rdata[rdlen..rdlen+2]).copy_from_slice(&v.flags.bits().to_be_bytes());
+                rdlen += 2;
+
+                rdata[rdlen] = v.protocol.0;
+                rdlen += 1;
+
+                rdata[rdlen] = v.algorithm.0;
+                rdlen += 1;
+                
+                (&mut rdata[rdlen..rdlen+v.public_key.len()]).copy_from_slice(&v.public_key.as_bytes());
+                rdlen += v.public_key.len();
+            },
+            &Value::CAA(ref v) => {
+                let rdata = &mut buffer[start..];
+                rdata[rdlen] = v.flags;
+                rdlen += 1;
+
+                rdata[rdlen] = v.tag.len() as u8;
+                rdlen += 1;
+
+                (&mut rdata[rdlen..rdlen+v.tag.len()]).copy_from_slice(&v.tag.as_bytes());
+                rdlen += v.tag.len();
+
+                (&mut rdata[rdlen..rdlen+v.value.len()]).copy_from_slice(&v.value.as_bytes());
+                rdlen += v.value.len();
+            },
+        }
+
+        let mut pkt = wire::RecordPacket::new_unchecked(&mut buffer[*offset..]);
+        assert!(rdlen <= std::u16::MAX as usize);
+        pkt.set_rdlen(rdlen as u16);
+
+        *offset += pkt.total_len();
+
+        Ok(*offset - begin)
+    }
+}
+
+impl std::fmt::Debug for Record {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.kind == wire::Kind::OPT {
+            write!(f, "Record {{ name: {:?}, kind: {:?}, value: {:?} }}",
+                self.name,
+                self.kind,
+                self.value)
+        } else {
+            f.debug_struct("Record")
+                .field("name", &self.name)
+                .field("kind", &self.kind)
+                .field("class", &self.class)
+                .field("ttl", &self.ttl)
+                .field("value", &self.value)
+                .finish()
+        }
+    }
+}
+
+impl std::fmt::Display for Record {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::str::FromStr for Record {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // 支持解析的 Kinds
+        // ['A', 'AAAA', 'DNSKEY', 'DS', 'NS', 'NSEC', 'RRSIG', 'SOA']
+        // 
+        // https://tools.ietf.org/html/rfc1035#section-5.1
+        // 两种文本格式:
+        //     1. DOMAIN_NAME [<TTL>] [<class>] <type> <RDATA>
+        //     2. DOMAIN_NAME [<class>] [<TTL>] <type> <RDATA>
+        // 这里支持的是第一种格式.
+        // 
+        let bytes = s.as_bytes();
+
+        let mut name: Option<String> = None;
+        let mut kind: Option<wire::Kind> = None;
+        let mut class: Option<wire::Class> = None;
+        let mut ttl: Option<u32> = None;
+        let mut rdata: Option<&str> = None;
+
+        let mut offset = 0usize;
+        let mut idx = 0usize;
+        while offset < bytes.len() {
+            let ch = bytes[offset];
+            if ch != b'\t' {
+                let start = offset;
+                offset += 1;
+                while offset < bytes.len() {
+                    if bytes[offset] == b'\t' {
+                        break;
+                    } else {
+                        offset += 1;
+                    }
+                }
+                
+                assert!(offset == bytes.len() || bytes[offset] == b'\t');
+                
+                let end = offset;
+                let data = &s[start..end];
+                if idx == 0 {
+                    // Domain Name
+                    let mut domain_name = s[start..end].to_lowercase();
+                    if !domain_name.ends_with('.') {
+                        debug!("Invalid DNS Name field: {:?} ", domain_name);
+                        return Err(Error::Unrecognized);
+                    }
+
+                    domain_name.pop();
+
+                    name = Some(domain_name);
+                    
+                } else if idx == 1 {
+                    // TTL
+                    match data.parse::<u32>() {
+                        Ok(n) => {
+                            ttl = Some(n);
+                        },
+                        Err(_) => {
+                            debug!("Invalid DNS TTL field: {:?} ", data);
+                            return Err(Error::Unrecognized);
+                        }
+                    }
+                } else if idx == 2 {
+                    // Class
+                    match data.parse::<wire::Class>() {
+                        Ok(v) => {
+                            class = Some(v);
+                        },
+                        Err(e) => {
+                            debug!("Invalid DNS Class field: {:?} ", data);
+                            return Err(Error::Unrecognized);
+                        }
+                    }
+                } else if idx == 3 {
+                    // Kind (Type)
+                    match data.parse::<wire::Kind>() {
+                        Ok(v) => {
+                            kind = Some(v);
+                        },
+                        Err(e) => {
+                            debug!("Invalid DNS Type field: {:?} ", data);
+                            return Err(Error::Unrecognized);
+                        }
+                    }
+                } else if idx == 4 {
+                    // Data
+                    rdata = Some(data);
+                } else {
+                    unreachable!();
+                }
+                
+                idx += 1;
+            } else {
+                offset += 1;
+            }
+        }
+
+        if name.is_none() || kind.is_none() || class.is_none() || ttl.is_none() || rdata.is_none() {
+            return Err(Error::Unrecognized);
+        }
+
+        let name = name.unwrap();
+        let kind = kind.unwrap();
+        let class = class.unwrap();
+        let ttl = ttl.unwrap();
+        let rdata = rdata.unwrap();
+        
+        let value = match kind {
+            wire::Kind::A => {
+                let v = rdata.parse::<Ipv4Addr>()
+                    .map_err(|_| Error::Unrecognized)?;
+                wire::Value::A(v)
+            },
+            wire::Kind::AAAA => {
+                let v = rdata.parse::<Ipv6Addr>()
+                    .map_err(|_| Error::Unrecognized)?;
+                wire::Value::AAAA(v)
+            },
+            wire::Kind::NS => {
+                let mut v = rdata.to_string();
+                if v.ends_with('.') {
+                    v.pop();
+                }
+                wire::Value::NS(v)
+            },
+            wire::Kind::DS => {
+                // "40387 8 2 F2A6E4458136145067FCA10141180BAC9FD4CA768908707D98E5E2412039A1E3"
+                let mut tmp = rdata.split(' ');
+                let key_tag = tmp.next().ok_or(Error::Unrecognized)?.parse::<u16>().map_err(|_| Error::Unrecognized)?;
+                let algorithm = wire::Algorithm(tmp.next().ok_or(Error::Unrecognized)?.parse::<u8>().map_err(|_| Error::Unrecognized)?);
+                let digest_type = wire::DigestKind(tmp.next().ok_or(Error::Unrecognized)?.parse::<u8>().map_err(|_| Error::Unrecognized)?);
+                let digest = hex::decode(tmp.next().ok_or(Error::Unrecognized)?).map_err(|_| Error::Unrecognized)?;
+                let digest = wire::Digest::new(digest);
+
+                wire::Value::DS(wire::DS { key_tag, algorithm, digest_type, digest })
+            },
+            wire::Kind::DNSKEY => {
+                // "256 3 8 AwEAAbPwrxwtOMENWvblQbUFwBllR7ZtXsu9rg="
+                let mut tmp = rdata.split(' ');
+                
+                let flags = tmp.next().ok_or(Error::Unrecognized)?.parse::<u16>().map_err(|_| Error::Unrecognized)?;
+                let flags = wire::DNSKEYFlags::new_unchecked(flags);
+                let protocol = tmp.next().ok_or(Error::Unrecognized)?.parse::<u8>().map_err(|_| Error::Unrecognized)?;
+                let protocol = wire::DNSKEYProtocol(protocol);
+                let algorithm = wire::Algorithm(tmp.next().ok_or(Error::Unrecognized)?.parse::<u8>().map_err(|_| Error::Unrecognized)?);
+                let public_key = base64::decode(tmp.next().ok_or(Error::Unrecognized)?).map_err(|_| Error::Unrecognized)?;
+                let public_key = wire::Digest::new(public_key);
+
+                wire::Value::DNSKEY(wire::DNSKEY { flags, protocol, algorithm, public_key })
+            },
+            wire::Kind::NSEC => {
+                // "ye. NS DS RRSIG NSEC"
+                let mut tmp = rdata.split(' ');
+                let mut next_domain_name = tmp.next().ok_or(Error::Unrecognized)?.to_string();
+                if next_domain_name.ends_with('.') {
+                    next_domain_name.pop();
+                }
+
+                let mut type_bit_maps = Vec::new();
+                for kind in tmp {
+                    if let Ok(kind) = kind.parse::<wire::Kind>() {
+                        type_bit_maps.push(kind);
+                    }
+                }
+
+                wire::Value::NSEC(wire::NSEC {
                     next_domain_name,
                     type_bit_maps,
                 })
             },
-            Kind::NSEC3 => {
-                if rdata.len() < 6 {
-                    return Err(Error::Truncated);
-                }
-
-                let hash_algorithm = Algorithm(packet[offset]);
-                let flags = packet[offset+1];
-                let iterations = u16::from_be_bytes([packet[offset+2], packet[offset+3]]);
-                let salt_length = packet[offset+4];
-
-                let salt_end = 5 + salt_length as usize;
-                if rdata.len() < salt_end + 1 {
-                    return Err(Error::Truncated);
-                }
-                let salt = &rdata[5..salt_end];
+            wire::Kind::RRSIG => {
+                // zw.          86400   IN  RRSIG   
+                // NSEC 8 1 86400 20191026050000 20191013040000 22545 . EGhf+lJQq8egDzxVATTj8CdW4p6fPZIjr2Y4bLZ1hEx
+                let mut tmp = rdata.split(' ');
                 
-                let hash_length = rdata[salt_end];
-                let hash_start = salt_end + 1;
-                let hash_end = hash_start + hash_length as usize;
-                if rdata.len() < hash_end + 1 {
-                    return Err(Error::Truncated);
-                }
-                let next_hashed_owner_name = &rdata[hash_start..hash_end];
-                let type_bit_maps = &rdata[hash_end+1..];
+                let type_covered = tmp.next().ok_or(Error::Unrecognized)?.parse::<wire::Kind>().map_err(|_| Error::Unrecognized)?;
+                let algorithm = wire::Algorithm(tmp.next().ok_or(Error::Unrecognized)?.parse::<u8>().map_err(|_| Error::Unrecognized)?);
+                let labels = tmp.next().ok_or(Error::Unrecognized)?.parse::<u8>().map_err(|_| Error::Unrecognized)?;
+                let original_ttl = tmp.next().ok_or(Error::Unrecognized)?.parse::<u32>().map_err(|_| Error::Unrecognized)?;
 
-                Ok(Record::NSEC3 {
-                    hash_algorithm,
-                    flags,
-                    iterations,
-                    salt_length,
-                    salt,
-                    hash_length,
-                    next_hashed_owner_name,
-                    type_bit_maps,
+                // 20191026050000
+                let signature_expiration = tmp.next().ok_or(Error::Unrecognized)?;
+                let signature_expiration = chrono::Utc.datetime_from_str(signature_expiration, "%Y%m%d%H%M%S")
+                    .map_err(|_| Error::Unrecognized)?.timestamp();
+                // 20191013040000
+                let signature_inception = tmp.next().ok_or(Error::Unrecognized)?;
+                let signature_inception = chrono::Utc.datetime_from_str(signature_inception, "%Y%m%d%H%M%S")
+                    .map_err(|_| Error::Unrecognized)?.timestamp();
+
+                const SAFE_TIMESTAMP: i64 = 1571875200i64; // 2019/10/24 00:00:00 UTC+8
+                if signature_expiration < SAFE_TIMESTAMP || signature_expiration > std::u32::MAX as i64 {
+                    return Err(Error::Unrecognized);
+                }
+                if signature_inception < SAFE_TIMESTAMP - 3*24*60*60 || signature_inception > std::u32::MAX as i64 {
+                    return Err(Error::Unrecognized);
+                }
+                let signature_expiration = signature_expiration as u32;
+                let signature_inception = signature_inception as u32;
+
+                let key_tag = tmp.next().ok_or(Error::Unrecognized)?.parse::<u16>().map_err(|_| Error::Unrecognized)?;
+                let mut signer_name = tmp.next().ok_or(Error::Unrecognized)?.to_string();
+                if signer_name.ends_with('.') {
+                    signer_name.pop();
+                }
+                let signature = base64::decode(tmp.next().ok_or(Error::Unrecognized)?).map_err(|_| Error::Unrecognized)?;
+                let signature = wire::Digest::new(signature);
+                
+                wire::Value::RRSIG(wire::RRSIG {
+                    type_covered,
+                    algorithm, 
+                    labels, 
+                    original_ttl, 
+                    signature_expiration, 
+                    signature_inception, 
+                    key_tag, 
+                    signer_name, 
+                    signature,
                 })
             },
-            Kind::NSEC3PARAM => {
-                if rdata.len() < 6 {
-                    return Err(Error::Truncated);
+            wire::Kind::SOA => {
+                // .            86400   IN  SOA 
+                // a.root-servers.net. nstld.verisign-grs.com. 2019101300 1800 900 604800 86400
+                let mut tmp = rdata.split(' ');
+                let mut mname = tmp.next().ok_or(Error::Unrecognized)?.to_string();
+                let mut rname = tmp.next().ok_or(Error::Unrecognized)?.to_string();
+                let serial = tmp.next().ok_or(Error::Unrecognized)?.parse::<u32>().map_err(|_| Error::Unrecognized)?;
+                let refresh = tmp.next().ok_or(Error::Unrecognized)?.parse::<i32>().map_err(|_| Error::Unrecognized)?;
+                let retry = tmp.next().ok_or(Error::Unrecognized)?.parse::<i32>().map_err(|_| Error::Unrecognized)?;
+                let expire = tmp.next().ok_or(Error::Unrecognized)?.parse::<i32>().map_err(|_| Error::Unrecognized)?;
+                let minimum = tmp.next().ok_or(Error::Unrecognized)?.parse::<u32>().map_err(|_| Error::Unrecognized)?;
+                
+                if mname.ends_with('.') {
+                    mname.pop();
+                }
+                if rname.ends_with('.') {
+                    rname.pop();
                 }
 
-                let hash_algorithm = Algorithm(packet[offset]);
-                let flags = packet[offset+1];
-                let iterations = u16::from_be_bytes([packet[offset+2], packet[offset+3]]);
-                let salt_length = packet[offset+4];
-                let salt = &rdata[5..];
-
-                Ok(Record::NSEC3PARAM {
-                    hash_algorithm,
-                    flags,
-                    iterations,
-                    salt_length,
-                    salt
-                })
+                wire::Value::SOA(wire::SOA { mname, rname, serial, refresh, retry, expire, minimum })
             },
-            _ => Ok(Record::Raw(rdata)),
+            _ => {
+                return Err(Error::Unrecognized);
+            }
+        };
+
+        let record = wire::Record {
+            name,
+            kind,
+            class,
+            ttl,
+            value,
+        };
+
+        Ok(record)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum PseudoRecord {
+    // pseudo resource records
+    // *        255     RFC 1035[1]     All cached records
+    // AXFR     252     RFC 1035[1]     Authoritative Zone Transfer 
+    // IXFR     251     RFC 1996        Incremental Zone Transfer
+    // OPT       41     RFC 6891        Option 
+
+    // TODO:
+    // ALL(ALL),
+    // AXFR(AXFR),
+    // IXFR(IXFR),
+    OPT(OPT),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum AnyRecord {
+    Normal(Record),
+    Pseudo(PseudoRecord),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum SectionKind {
+    Answer,
+    Authority,
+    Additional,
+}
+
+pub fn deserialize_record(offset: &mut usize, buffer: &[u8]) -> Result<Option<AnyRecord>, Error> {
+    let mut name = String::new();
+    let amt = wire::read_name(*offset, &buffer, &mut name, 0)?;
+    *offset += amt;
+
+    let rr = wire::RecordPacket::new_checked(&buffer[*offset..])?;
+    let kind = rr.kind();
+
+    if kind.is_pseudo_record_kind() {
+        match deserialize_pseudo_record(offset, name, buffer)? {
+            Some(pseudo_record) => Ok(Some(AnyRecord::Pseudo(pseudo_record))),
+            None => Ok(None),
+        }
+    } else {
+        match deserialize_normal_record(offset, name, buffer)? {
+            Some(record) => Ok(Some(AnyRecord::Normal(record))),
+            None => Ok(None),
+        }
+    }
+}
+
+pub fn deserialize_pseudo_record(offset: &mut usize, name: String, buffer: &[u8]) -> Result<Option<PseudoRecord>, Error> {
+    let rr = wire::RecordPacket::new_checked(&buffer[*offset..])?;
+    let kind = rr.kind();
+    let rdlen = rr.rdlen();
+
+    let record = match kind {
+        Kind::ALL | Kind::AXFR | Kind::IXFR => {
+            // NOTE: 暂不支持对这些 Record 的解析
+            None
+        },
+        Kind::OPT => {
+            if !name.is_empty() {
+                debug!("OPT Record Name must be empty (ROOT).");
+                return Err(Error::Unrecognized);
+            }
+
+            let ext_rr = wire::ExtensionPacket::new_checked(&buffer[*offset..])?;
+            let udp_size = ext_rr.udp_size();
+            let ext_rcode = ext_rr.rcode();
+            let ext_version = ext_rr.version();
+            let ext_flags = ext_rr.flags();
+            let rdlen = ext_rr.rdlen();
+            let rdata = ext_rr.rdata();
+
+            let opt_value = if rdlen == 0 {
+                OptValue::None
+            } else {
+                let opt_data = wire::ExtensionDataPacket::new_checked(rdata)?;
+                let opt_code = opt_data.option_code();
+                let opt_length = opt_data.option_length();
+
+                if opt_code == wire::OptionCode::EDNS_CLIENT_SUBNET {
+                    let opt_data_pkt = wire::ClientSubnetPacket::new_checked(opt_data.option_data())?;
+                    let client_subnet = ClientSubnet {
+                        src_prefix_len: opt_data_pkt.src_prefixlen(),
+                        scope_prefix_len: opt_data_pkt.scope_prefixlen(),
+                        address: opt_data_pkt.address(),
+                    };
+
+                    OptValue::ECS(client_subnet)
+                } else {
+                    debug!("unknow opt record data: CODE={} RDATA={:?}", opt_code, opt_data.option_data());
+                    OptValue::None
+                }
+            };
+
+            Some(PseudoRecord::OPT(OPT {
+                udp_size, 
+                rcode: ext_rcode,
+                version: ext_version,
+                flags: ext_flags,
+                value: opt_value,
+            }))
+        },
+        _ => None,
+    };
+
+    *offset += rr.total_len();
+
+    Ok(record)
+}
+
+pub fn deserialize_normal_record(offset: &mut usize, name: String, buffer: &[u8]) -> Result<Option<Record>, Error> {
+    let rr = wire::RecordPacket::new_checked(&buffer[*offset..])?;
+    let kind = rr.kind();
+    let class = rr.class();
+    let ttl = rr.ttl();
+    let rdlen = rr.rdlen();
+    let rdata = rr.rdata();
+    if rdata.len() < rdlen as usize {
+        return Err(Error::Truncated);
+    }
+
+    *offset += rr.header_len();
+
+    // parse record data
+    let start = *offset; // rdata offset
+    *offset += rdlen as usize;
+
+    let record_value = match kind {
+        Kind::A => {
+            if rdlen < 4 {
+                return Err(Error::Truncated);
+            }
+
+            Some(Value::A(std::net::Ipv4Addr::new(rdata[0], rdata[1], rdata[2], rdata[3])))
+        },
+        Kind::AAAA => {
+            if rdlen < 16 {
+                return Err(Error::Truncated);
+            }
+
+            let mut octets = [0u8; 16];
+            &mut octets.copy_from_slice(&rdata[..16]);
+
+            Some(Value::AAAA(std::net::Ipv6Addr::from(octets)))
+        },
+        Kind::NS => {
+            let mut name = String::new();
+            let _amt = wire::read_name(start, &buffer, &mut name, 0)?;
+
+            Some(Value::NS(name))
+        },
+        Kind::CNAME => {
+            let mut name = String::new();
+            let _amt = wire::read_name(start, &buffer, &mut name, 0)?;
+
+            Some(Value::CNAME(name))
+        },
+        Kind::DNAME => {
+            let mut name = String::new();
+            let _amt = wire::read_name(start, &buffer, &mut name, 0)?;
+
+            Some(Value::DNAME(name))
+        },
+        Kind::TXT => {
+            let txt = (&rdata).iter().map(|b| *b as char).collect::<String>();
+            Some(Value::TXT(txt))
+        },
+        Kind::MX  => {
+            if rdlen < 2 {
+                return Err(Error::Truncated);
+            }
+
+            let preference = i16::from_be_bytes([rdata[0], rdata[1]]);
+            let mut exchange = String::new();
+            let _amt = wire::read_name(start+2, &buffer, &mut exchange, 0)?;
+
+            Some(Value::MX(MX { preference, exchange }))
+        },
+        Kind::SOA => {
+            let mut mname = String::new();
+            let amt = wire::read_name(start, &buffer, &mut mname, 0)?;
+            if (rdlen as usize) < amt {
+                return Err(Error::Truncated);
+            }
+
+            let mut rname = String::new();
+            let amt2 = wire::read_name(start + amt, &buffer, &mut rname, 0)?;
+            if (rdlen as usize) < amt + amt2 + 20 {
+                return Err(Error::Truncated);
+            }
+
+            let start = amt + amt2;
+            let serial = u32::from_be_bytes([rdata[start+0], rdata[start+1], rdata[start+2], rdata[start+3]]);
+
+            let start = start + 4;
+            let refresh = i32::from_be_bytes([rdata[start+0], rdata[start+1], rdata[start+2], rdata[start+3]]);
+
+            let start = start + 4;
+            let retry = i32::from_be_bytes([rdata[start+0], rdata[start+1], rdata[start+2], rdata[start+3]]);
+
+            let start = start + 4;
+            let expire = i32::from_be_bytes([rdata[start+0], rdata[start+1], rdata[start+2], rdata[start+3]]);
+
+            let start = start + 4;
+            let minimum = u32::from_be_bytes([rdata[start+0], rdata[start+1], rdata[start+2], rdata[start+3]]);
+
+            Some(Value::SOA(SOA { mname, rname, serial, refresh, retry, expire, minimum }))
+        },
+        // DNSSEC
+        Kind::DS => {
+            if rdlen < 4 {
+                return Err(Error::Truncated);
+            }
+
+            let key_tag = u16::from_be_bytes([buffer[start], buffer[start+1]]);
+            let algorithm = wire::Algorithm(buffer[start+2]);
+            // 1      SHA-1                   MANDATORY
+            // 2      SHA-256
+            let digest_type = wire::DigestKind(buffer[start+3]);
+            let digest = &rdata[4..];
+
+            Some(Value::DS(DS {
+                key_tag,
+                algorithm,
+                digest_type,
+                digest: wire::Digest::new(digest.to_vec()),
+            }))
+        },
+        Kind::NSEC => {
+            let mut next_domain_name = String::new();
+            let amt = wire::read_name(start, &buffer, &mut next_domain_name, 0)?;
+            if (rdlen as usize) < amt {
+                return Err(Error::Truncated);
+            }
+
+            let type_bit_maps = &rdata[amt..];
+            let type_bit_maps = decode_type_bit_maps(type_bit_maps)?;
+
+            Some(Value::NSEC( NSEC {
+                next_domain_name,
+                type_bit_maps: type_bit_maps,
+            }))
+        },
+        Kind::NSEC3 => {
+            if rdlen < 6 {
+                return Err(Error::Truncated);
+            }
+
+            let hash_algorithm = wire::Algorithm(buffer[start]);
+            let flags = wire::NSEC3Flags::new_unchecked(buffer[start+1]);
+            let iterations = u16::from_be_bytes([buffer[start+2], buffer[start+3]]);
+            let salt_length = buffer[start+4];
+
+            let salt_end = 5 + salt_length as usize;
+            if rdata.len() < salt_end + 1 {
+                return Err(Error::Truncated);
+            }
+            let salt = wire::Digest::new((&rdata[5..salt_end]).to_vec());
+            
+            let hash_length = rdata[salt_end];
+            let hash_start = salt_end + 1;
+            let hash_end = hash_start + hash_length as usize;
+            if rdata.len() < hash_end + 1 {
+                return Err(Error::Truncated);
+            }
+
+            let next_hashed_owner_name = wire::Digest::new(rdata[hash_start..hash_end].to_vec());
+            let type_bit_maps = &rdata[hash_end..];
+            let type_bit_maps = decode_type_bit_maps(type_bit_maps)?;
+            
+            Some(Value::NSEC3(NSEC3 {
+                hash_algorithm,
+                flags,
+                iterations,
+                salt_length,
+                salt,
+                hash_length,
+                next_hashed_owner_name,
+                type_bit_maps,
+            }))
+        },
+        Kind::NSEC3PARAM => {
+            if rdlen < 5 {
+                return Err(Error::Truncated);
+            }
+
+            let hash_algorithm = wire::Algorithm(buffer[start]);
+            let flags = buffer[start+1];
+            let iterations = u16::from_be_bytes([buffer[start+2], buffer[start+3]]);
+            let salt_length = buffer[start+4];
+            let salt_end = 5 + salt_length as usize;
+            if rdata.len() < salt_end + 1 {
+                return Err(Error::Truncated);
+            }
+            let salt = wire::Digest::new((&rdata[5..salt_end]).to_vec());
+
+            Some(Value::NSEC3PARAM(NSEC3PARAM {
+                hash_algorithm,
+                flags,
+                iterations,
+                salt_length,
+                salt,
+            }))
+        },
+        Kind::RRSIG => {
+            if rdlen < 19 {
+                return Err(Error::Truncated);
+            }
+
+            let type_covered = wire::Kind(u16::from_be_bytes([buffer[start], buffer[start+1]]));
+            let algorithm = wire::Algorithm(buffer[start+2]);
+            let labels = buffer[start+3];
+            let original_ttl = u32::from_be_bytes([buffer[start+4], buffer[start+5], buffer[start+6], buffer[start+7]]);
+            let signature_expiration = u32::from_be_bytes([buffer[start+8], buffer[start+9], buffer[start+10], buffer[start+11]]);
+            let signature_inception = u32::from_be_bytes([buffer[start+12], buffer[start+13], buffer[start+14], buffer[start+15]]);
+            let key_tag = u16::from_be_bytes([buffer[start+16], buffer[start+17]]);
+
+            let mut signer_name = String::new();
+            let amt = wire::read_name(start+18, &buffer, &mut signer_name, 0)?;
+            
+            if rdata.len() < 19 + amt {
+                return Err(Error::Truncated);
+            }
+
+            let signature = wire::Digest::new(rdata[18+amt..].to_vec());
+
+            Some(Value::RRSIG(RRSIG {
+                type_covered,
+                algorithm,
+                labels,
+                original_ttl,
+                signature_expiration,
+                signature_inception,
+                key_tag,
+                signer_name,
+                signature,
+            }))
+        },
+        Kind::DNSKEY => {
+            if rdata.len() < 4 {
+                return Err(Error::Truncated);
+            }
+
+            let flags = wire::DNSKEYFlags::new_unchecked(u16::from_be_bytes([buffer[start], buffer[start+1]]));
+            let protocol = wire::DNSKEYProtocol(buffer[start+2]);
+            let algorithm = wire::Algorithm(buffer[start+3]);
+            let public_key = wire::Digest::new(rdata[4..].to_vec());
+
+            if protocol != wire::DNSKEYProtocol::V3 {
+                // protocol must be 0x03;
+
+            }
+
+            Some(Value::DNSKEY(DNSKEY { flags, protocol, algorithm, public_key }))
+        },
+
+        Kind::CAA => {
+            if rdata.len() < 2 {
+                return Err(Error::Truncated);
+            }
+
+            let flags = rdata[0];
+            let tag_len = rdata[1];
+
+            if rdata.len() < 2 + tag_len as usize {
+                return Err(Error::Truncated);
+            }
+
+            let tag_end = 2 + tag_len as usize;
+            let tag = (&rdata[2..tag_end]).iter().map(|b| *b as char).collect::<String>();
+
+            let value = (&rdata[tag_end..]).iter().map(|b| *b as char).collect::<String>();
+
+            Some(Value::CAA(CAA { flags, tag, value }))
+        },
+
+        Kind::OPT | Kind::ALL | Kind::AXFR | Kind::IXFR => {
+            // pseudo record
+            None
+        },
+        _ => {
+            None
+        }
+    };
+    
+    match record_value {
+        Some(value) => {
+            let record = Record {
+                name, kind, class, ttl, value
+            };
+
+            Ok(Some(record))
+        },
+        None => {
+            Ok(None)
         }
     }
 }
 
 
-    
-    
+// NSEC RDATA Wire Format
+// 
+// 2.1.2.  The List of Type Bit Map(s) Field
+// https://tools.ietf.org/html/rfc3845#section-2.1.2
+// 
+// NSEC3 RDATA Wire Format
+// 
+// 3.2.1.  Type Bit Maps Encoding
+// https://tools.ietf.org/html/rfc5155#section-3.2.1
+pub fn decode_type_bit_maps(buffer: &[u8]) -> Result<Vec<wire::Kind>, Error> {
+    let mut kinds = Vec::new();
+    let mut offset = 0usize;
 
-impl<'a> std::fmt::Display for Record<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self {
-            &Self::A(addr) => std::fmt::Display::fmt(&addr, f),
-            &Self::AAAA(addr) => std::fmt::Display::fmt(&addr, f),
-            &Self::CNAME(s) => std::fmt::Display::fmt(&s, f),
-            &Self::DNAME(s) => std::fmt::Display::fmt(&s, f),
-            &Self::TXT(s) => std::fmt::Display::fmt(s, f),
-            &Self::NS(s) => std::fmt::Display::fmt(s, f),
-            &Self::PTR(s) => std::fmt::Display::fmt(s, f),
-            &Self::HINFO { ref cpu, ref os } => {
-                write!(f, "cpu: {}, os:{}", cpu,
-                    match os {
-                        Some(ref os) => os,
-                        None => "N/A"
-                    })
-            },
-            &Self::MX { preference, exchange } => write!(f, "preference: {}, exchange: {}", preference, exchange),
-            &Self::SOA { mname, rname, serial, refresh, retry, expire, minimum } => {
-                write!(f, "mname: {}, rname: {}, serial: {}, refresh: {}, retry: {}, expire: {}, minimum: {}",
-                    mname, rname, serial, refresh, retry, expire, minimum)
-            },
-            &Self::Raw(data) => write!(f, "{:?}", data),
-            &Self::DNSKEY { flags, protocol, algorithm, public_key } => {
-                write!(f, "flags: {}, protocol: {}, algorithm: {}, public_key: {}", flags, protocol, algorithm,
-                    hexdigest(public_key))
-            },
-            &Self::RRSIG { type_covered, algorithm, labels, original_ttl, signature_expiration, signature_inception, key_tag, signer_name, signature } => {
-                write!(f, "type_covered: {}, algorithm: {}, labels: {}, original_ttl: {}, signature_expiration: {}, signature_inception: {}, key_tag: {}, signer_name: {}, signature: {:?}",
-                    type_covered, algorithm, labels, original_ttl, signature_expiration, signature_inception, 
-                    key_tag, signer_name, hexdigest(signature))
-            },
-            &Self::NSEC { next_domain_name, type_bit_maps } => {
-                write!(f, "next_domain_name: {}, type_bit_maps: {:?}", next_domain_name, hexdigest(type_bit_maps))
-            },
-            &Self::NSEC3 { hash_algorithm, flags, iterations, salt_length, salt, hash_length, next_hashed_owner_name, type_bit_maps} => {
-                write!(f, "hash_algorithm: {}, flags: {}, iterations: {}, salt_length: {}, salt: {:?}, hash_length: {}, next_hashed_owner_name: {:?}, type_bit_maps: {:?}",
-                hash_algorithm, flags, iterations, salt_length, hexdigest(salt), hash_length,
-                hexdigest(next_hashed_owner_name),
-                hexdigest(type_bit_maps))
-            },
-            &Self::NSEC3PARAM { hash_algorithm, flags, iterations, salt_length, salt } => {
-                write!(f, "hash_algorithm: {}, flags: {}, iterations: {}, salt_length: {}, salt: {:?}",
-                hash_algorithm, flags, iterations, salt_length, salt)
-            },
-            &Self::DS { key_tag, algorithm, digest_type, digest } => {
-                write!(f, "key_tag: {}, algorithm: {}, digest_type: {}, digest: {:?}",
-                    key_tag, algorithm, digest_type, hexdigest(digest))
-            },
-            _ => write!(f, "{:?}", self)
+    while offset < buffer.len() {
+        if buffer.len() < offset + 2 {
+            return Err(Error::Truncated);
         }
+
+        let window = buffer[offset];
+        let mut bitmap_len = buffer[offset + 1];
+        if bitmap_len == 0 || bitmap_len > 32 {
+            // bitmap length (from 1 to 32)
+            return Err(Error::Unrecognized);
+        }
+
+        offset += 2;
+        
+        let bitmap_start = offset;
+        let bitmap_end   = offset + bitmap_len as usize;
+        if buffer.len() < bitmap_end {
+            return Err(Error::Truncated);
+        }
+
+        let bitmap = &buffer[bitmap_start..bitmap_end];
+        offset += bitmap_len as usize;
+
+        let mut bitmap_idx = 0u16;
+        for bits in bitmap {
+            let start = window as u16 * (std::u8::MAX as u16 + 1);
+            for i in 0usize..8 {
+                let bit = bits << i >> 7;
+                // if bitmap_idx > 0 && bit == 1 {
+                if bit == 1 {
+                    let n = start + bitmap_idx;
+                    kinds.push(wire::Kind(n));
+                }
+
+                bitmap_idx += 1;
+            }
+        }
+    }
+
+    Ok(kinds)
+}
+
+pub fn encode_type_bit_maps(input: &mut Vec<wire::Kind>, mut output: &mut [u8]) -> Result<usize, Error> {
+    input.sort();
+
+    let mut amt = 0usize;
+    
+    let mut window = 0u8;
+    let mut bitmap_len = 0u8;
+    let mut bitmap_idx = 0u8;
+    for i in 2..34 {
+        if let Some(mut byte) = output.get_mut(i) {
+            *byte = 0;
+        }
+    }
+
+    for (idx, kind) in input.iter().enumerate() {
+        let [hi, lo] = kind.0.to_be_bytes();
+
+        let is_last_kind = idx == input.len() - 1;
+        let is_new_window = hi != window;
+
+        if is_new_window {
+            let len_bytes = bitmap_len + 1;
+            if len_bytes == 0 || len_bytes > 32 {
+                return Err(Error::Unrecognized);
+            }
+
+            output[0] = window;
+            output[1] = len_bytes;
+            let window_len = len_bytes as usize + 2;
+            output = &mut output[window_len..];
+            for i in 2..34 {
+                if let Some(mut byte) = output.get_mut(i) {
+                    *byte = 0;
+                }
+            }
+
+            amt += window_len;
+
+            window = hi;
+            bitmap_len = 0;
+            bitmap_idx = 0;
+        }
+
+        let bit_idx = lo % 8;
+        let byte_idx = if bit_idx > 0 {
+            lo / 8
+        } else {
+            lo / 8
+        };
+        
+        bitmap_len = byte_idx;
+        bitmap_idx = bit_idx;
+        
+        let byte_idx = byte_idx as usize + 2;
+        if output.len() < byte_idx {
+            return Err(Error::Truncated);
+        }
+        match bit_idx {
+            0 => output[byte_idx] |= 0b_1000_0000,
+            1 => output[byte_idx] |= 0b_0100_0000,
+            2 => output[byte_idx] |= 0b_0010_0000,
+            3 => output[byte_idx] |= 0b_0001_0000,
+            4 => output[byte_idx] |= 0b_0000_1000,
+            5 => output[byte_idx] |= 0b_0000_0100,
+            6 => output[byte_idx] |= 0b_0000_0010,
+            7 => output[byte_idx] |= 0b_0000_0001,
+            _ => unreachable!(),
+        };
+
+        if is_last_kind {
+            let len_bytes = bitmap_len + 1;
+            if len_bytes == 0 || len_bytes > 32 {
+                return Err(Error::Unrecognized);
+            }
+            
+            output[0] = window;
+            output[1] = len_bytes;
+            let window_len = len_bytes as usize + 2;
+            
+            amt += window_len;
+        }
+    }
+
+    Ok(amt)
+}
+
+
+#[test]
+fn test_parse_root_zone() {
+    let data = include_str!("../../data/root.zone");
+
+    for line in data.lines() {
+        assert!(line.parse::<Record>().is_ok(), line);
     }
 }
 
-fn hexdigest(digest: &[u8]) -> String {
-    let mut s = String::from("0x");
-    for n in digest.iter() {
-        s.push_str(format!("{:02x}", n).as_ref());
-    }
-    s
+#[test]
+fn test_encode_type_bit_maps() {
+    let bitmap: Vec<u8> = vec![0, 7, 34, 0, 0, 0, 0, 2, 144];
+    assert_eq!(decode_type_bit_maps(&bitmap), Ok(vec![Kind::NS, Kind::SOA, Kind::RRSIG, Kind::DNSKEY, Kind::NSEC3PARAM]));
+
+    assert_eq!(decode_type_bit_maps(&[0u8, 7, 34, 0, 0, 0, 0, 2, 144, 1, 1, 128]),
+        Ok(vec![Kind::NS, Kind::SOA, Kind::RRSIG, Kind::DNSKEY, Kind::NSEC3PARAM, Kind::URI]));
+
+    assert_eq!(decode_type_bit_maps(&[0, 7, 34, 0, 0, 0, 0, 2, 144, 1, 1, 64]),
+        Ok(vec![Kind::NS, Kind::SOA, Kind::RRSIG, Kind::DNSKEY, Kind::NSEC3PARAM, Kind::CAA]));
+
+    assert_eq!(decode_type_bit_maps(&[0u8, 7, 34, 0, 0, 0, 0, 2, 144, 1, 1, 192, 128, 1, 128]),
+        Ok(vec![Kind::NS, Kind::SOA, Kind::RRSIG, Kind::DNSKEY, Kind::NSEC3PARAM, Kind::URI, Kind::CAA, Kind::TA]));
+}
+
+#[test]
+fn test_decode_type_bit_maps() {
+    let mut buffer = [0u8; 1024];
+
+    let mut kinds = vec![Kind::NS, Kind::SOA, Kind::RRSIG, Kind::DNSKEY, Kind::NSEC3PARAM];
+    let amt = encode_type_bit_maps(&mut kinds, &mut buffer);
+    assert!(amt.is_ok());
+    let amt = amt.unwrap();
+    let bitmap = &buffer[..amt];
+    assert_eq!(bitmap, &[0u8, 7, 34, 0, 0, 0, 0, 2, 144]);
+
+
+    let mut kinds = vec![Kind::NS, Kind::SOA, Kind::RRSIG, Kind::DNSKEY, Kind::NSEC3PARAM, Kind::URI];
+    let amt = encode_type_bit_maps(&mut kinds, &mut buffer);
+    assert!(amt.is_ok());
+    let amt = amt.unwrap();
+    let bitmap = &buffer[..amt];
+    assert_eq!(bitmap, &[0u8, 7, 34, 0, 0, 0, 0, 2, 144, 1, 1, 128]);
+
+
+    let mut kinds = vec![Kind::NS, Kind::SOA, Kind::RRSIG, Kind::DNSKEY, Kind::NSEC3PARAM, Kind::CAA];
+    let amt = encode_type_bit_maps(&mut kinds, &mut buffer);
+    assert!(amt.is_ok());
+    let amt = amt.unwrap();
+    let bitmap = &buffer[..amt];
+    assert_eq!(bitmap, &[0, 7, 34, 0, 0, 0, 0, 2, 144, 1, 1, 64]);
+
+
+    let mut kinds = vec![Kind::NS, Kind::SOA, Kind::RRSIG, Kind::DNSKEY, Kind::NSEC3PARAM, Kind::CAA, Kind::URI, Kind::TA];
+    let amt = encode_type_bit_maps(&mut kinds, &mut buffer);
+    assert!(amt.is_ok());
+    let amt = amt.unwrap();
+    let bitmap = &buffer[..amt];
+    assert_eq!(bitmap, &[0u8, 7, 34, 0, 0, 0, 0, 2, 144, 1, 1, 192, 128, 1, 128]);
 }

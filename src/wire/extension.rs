@@ -45,7 +45,7 @@ impl ExtensionFlags {
 
 /// DNS EDNS0 Option Codes (OPT)
 /// https://www.iana.org/assignments/dns-parameters/dns-parameters.xhtml#dns-parameters-11
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub struct OptionCode(pub u16);
 
 impl OptionCode {
@@ -132,25 +132,25 @@ impl OptionCode {
     }
 }
 
-impl std::fmt::Display for OptionCode {
+impl std::fmt::Debug for OptionCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            &OptionCode::LLQ => write!(f, "LLQ"),
-            &OptionCode::UL => write!(f, "UL"),
-            &OptionCode::NSID => write!(f, "NSID"),
-            &OptionCode::DAU => write!(f, "DAU"),
-            &OptionCode::DHU => write!(f, "DHU"),
-            &OptionCode::N3U => write!(f, "N3U"),
-            &OptionCode::EDNS_CLIENT_SUBNET => write!(f, "EDNS_CLIENT_SUBNET"),
-            &OptionCode::EDNS_EXPIRE => write!(f, "EDNS_EXPIRE"),
-            &OptionCode::COOKIE => write!(f, "COOKIE"),
-            &OptionCode::EDNS_TCP_KEEPALIVE => write!(f, "EDNS_TCP_KEEPALIVE"),
-            &OptionCode::PADDING => write!(f, "PADDING"),
-            &OptionCode::CHAIN => write!(f, "CHAIN"),
-            &OptionCode::EDNS_KEY_TAG => write!(f, "EDNS_KEY_TAG"),
-            &OptionCode::EDNS_CLIENT_TAG => write!(f, "EDNS_CLIENT_TAG"),
-            &OptionCode::EDNS_SERVER_TAG => write!(f, "EDNS_SERVER_TAG"),
-            &OptionCode::DEVICE_ID => write!(f, "DEVICE_ID"),
+            &Self::LLQ => write!(f, "LLQ"),
+            &Self::UL => write!(f, "UL"),
+            &Self::NSID => write!(f, "NSID"),
+            &Self::DAU => write!(f, "DAU"),
+            &Self::DHU => write!(f, "DHU"),
+            &Self::N3U => write!(f, "N3U"),
+            &Self::EDNS_CLIENT_SUBNET => write!(f, "EDNS_CLIENT_SUBNET"),
+            &Self::EDNS_EXPIRE => write!(f, "EDNS_EXPIRE"),
+            &Self::COOKIE => write!(f, "COOKIE"),
+            &Self::EDNS_TCP_KEEPALIVE => write!(f, "EDNS_TCP_KEEPALIVE"),
+            &Self::PADDING => write!(f, "PADDING"),
+            &Self::CHAIN => write!(f, "CHAIN"),
+            &Self::EDNS_KEY_TAG => write!(f, "EDNS_KEY_TAG"),
+            &Self::EDNS_CLIENT_TAG => write!(f, "EDNS_CLIENT_TAG"),
+            &Self::EDNS_SERVER_TAG => write!(f, "EDNS_SERVER_TAG"),
+            &Self::DEVICE_ID => write!(f, "DEVICE_ID"),
             _ => {
                 if self.is_unassigned() {
                     write!(f, "Unassigned({})", self.0)
@@ -164,9 +164,15 @@ impl std::fmt::Display for OptionCode {
     }
 }
 
+impl std::fmt::Display for OptionCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 /// Address Family Numbers
 /// https://www.iana.org/assignments/address-family-numbers/address-family-numbers.xhtml
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub struct AddressFamily(pub u16);
 
 impl AddressFamily {
@@ -196,19 +202,25 @@ impl AddressFamily {
     }
 }
 
-impl std::fmt::Display for AddressFamily {
+impl std::fmt::Debug for AddressFamily {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            &AddressFamily::IPV4 => write!(f, "IPV4"),
-            &AddressFamily::IPV6 => write!(f, "IPV6"),
-            &AddressFamily::DOMAIN_NAME => write!(f, "DOMAIN_NAME"),
-            &AddressFamily::AS => write!(f, "AS"),
-            &AddressFamily::MAC48 => write!(f, "MAC48"),
-            &AddressFamily::MAC64 => write!(f, "MAC64"),
+            &Self::IPV4 => write!(f, "IPV4"),
+            &Self::IPV6 => write!(f, "IPV6"),
+            &Self::DOMAIN_NAME => write!(f, "DOMAIN_NAME"),
+            &Self::AS => write!(f, "AS"),
+            &Self::MAC48 => write!(f, "MAC48"),
+            &Self::MAC64 => write!(f, "MAC64"),
             _ => {
                 write!(f, "Unknow({})", self.0)
             },
         }
+    }
+}
+
+impl std::fmt::Display for AddressFamily {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 

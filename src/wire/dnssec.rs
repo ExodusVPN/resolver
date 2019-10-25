@@ -78,17 +78,47 @@ impl std::fmt::Display for DNSKEYFlags {
     }
 }
 
+// https://tools.ietf.org/html/rfc5155#section-3.2
+// 
+// Flags field is a single octet, the Opt-Out flag is the least
+// significant bit, as shown below:
+// 
+// 0 1 2 3 4 5 6 7
+// +-+-+-+-+-+-+-+-+
+// |             |O|
+// +-+-+-+-+-+-+-+-+
+bitflags! {
+    pub struct NSEC3Flags: u8 {
+        const OPT_OUT = 0b_0000_0001;
+    }
+}
+
+impl NSEC3Flags {
+    pub fn new_unchecked(bits: u8) -> Self {
+        unsafe {
+            Self::from_bits_unchecked(bits)
+        }
+    }
+}
+
+impl std::fmt::Display for NSEC3Flags {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+
 /// The Protocol Field MUST have value 3, and the DNSKEY RR MUST be
 /// treated as invalid during signature verification if it is found to be
 /// some value other than 3.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub struct DNSKEYProtocol(pub u8);
 
 impl DNSKEYProtocol {
     pub const V3: Self = Self(3);
 }
 
-impl std::fmt::Display for DNSKEYProtocol {
+impl std::fmt::Debug for DNSKEYProtocol {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
             Self::V3 => write!(f, "V3"),
@@ -96,6 +126,13 @@ impl std::fmt::Display for DNSKEYProtocol {
         }
     }
 }
+
+impl std::fmt::Display for DNSKEYProtocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 // DNS Security Algorithm Numbers
 // https://www.iana.org/assignments/dns-sec-alg-numbers/dns-sec-alg-numbers.xhtml#dns-sec-alg-numbers-1
 // 
@@ -176,7 +213,7 @@ impl std::fmt::Display for DNSKEYProtocol {
 // 
 // https://csrc.nist.gov/csrc/media/publications/fips/186/3/archive/2009-06-25/documents/fips_186-3.pdf
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub struct Algorithm(pub u8);
 
 impl Algorithm {
@@ -242,7 +279,7 @@ impl Algorithm {
     }
 }
 
-impl std::fmt::Display for Algorithm {
+impl std::fmt::Debug for Algorithm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
             Self::RSAMD5 => write!(f, "RSAMD5"),
@@ -274,6 +311,12 @@ impl std::fmt::Display for Algorithm {
     }
 }
 
+impl std::fmt::Display for Algorithm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 // A.2.  DNSSEC Digest Types
 // https://tools.ietf.org/html/rfc4034#appendix-A.2
 // 2.  Implementing the SHA-256 Algorithm for DS Record Support
@@ -297,7 +340,7 @@ impl std::fmt::Display for Algorithm {
 // 
 //      DNSKEY RDATA = Flags | Protocol | Algorithm | Public Key
 // 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub struct DigestKind(pub u8);
 
 impl DigestKind {
@@ -317,7 +360,7 @@ impl DigestKind {
     }
 }
 
-impl std::fmt::Display for DigestKind {
+impl std::fmt::Debug for DigestKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
             Self::SHA1 => write!(f, "SHA1"),
@@ -330,6 +373,12 @@ impl std::fmt::Display for DigestKind {
                 }
             },
         }
+    }
+}
+
+impl std::fmt::Display for DigestKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 

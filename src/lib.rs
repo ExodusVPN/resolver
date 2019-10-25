@@ -4,7 +4,9 @@ extern crate log;
 extern crate bitflags;
 extern crate punycode;
 extern crate base64;
+extern crate hex;
 extern crate openssl;
+extern crate chrono;
 
 mod error;
 pub use error::Error;
