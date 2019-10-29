@@ -26,7 +26,34 @@ use std::net::IpAddr;
 use std::collections::HashMap;
 
 
-pub const MAX_BUFFER_SIZE: usize = crate::MAXIMUM_TCP_MESSAGES_SIZE + 2; // 加上 2 Bytes 的消息长度
+// 2.3.4. Size limits
+// https://tools.ietf.org/html/rfc1035#section-2.3.4
+// 
+// Various objects and parameters in the DNS have size limits.  They are
+// listed below.  Some could be easily changed, others are more
+// fundamental.
+// 
+// labels          63 octets or less
+// 
+// names           255 octets or less
+// 
+// TTL             positive values of a signed 32 bit number.
+// 
+// UDP messages    512 octets or less
+// 
+// https://tools.ietf.org/html/rfc2671#section-4.5
+// 
+
+// Maximum
+/// 63 octets or less
+pub const MAXIMUM_LABEL_SIZE: usize        = 63;
+/// 255 octets or less
+pub const MAXIMUM_NAMES_SIZE: usize        = 255;
+/// 512 octets or less
+pub const MAXIMUM_UDP_MESSAGES_SIZE: usize = 512;
+pub const MAXIMUM_TCP_MESSAGES_SIZE: usize = std::u16::MAX as usize;
+
+pub const MAX_BUFFER_SIZE: usize = MAXIMUM_TCP_MESSAGES_SIZE + 2; // 加上 2 Bytes 的消息长度
 
 
 #[inline]

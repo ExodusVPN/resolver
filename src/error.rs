@@ -109,19 +109,6 @@ impl std::convert::TryFrom<ResponseCode> for Error {
     fn try_from(value: ResponseCode) -> Result<Self, Self::Error> {
         match value {
             ResponseCode::OK           => Err(Error::ServerFailure),
-            ResponseCode::FORMAT_ERROR => Ok(Error::LabelSizeLimitExceeded),
-            ResponseCode::FORMAT_ERROR => Ok(Error::NamesSizeLimitExceeded),
-            ResponseCode::FORMAT_ERROR => Ok(Error::UdpMessagesSizeLimitExceeded),
-            ResponseCode::FORMAT_ERROR => Ok(Error::InvalidDomainName),
-            ResponseCode::FORMAT_ERROR => Ok(Error::InvalidDomainNameLabel),
-            ResponseCode::FORMAT_ERROR => Ok(Error::InvalidUtf8Sequence),
-            ResponseCode::FORMAT_ERROR => Ok(Error::InvalidLabelKind),
-            ResponseCode::FORMAT_ERROR => Ok(Error::InvalidExtLabelKind),
-            ResponseCode::FORMAT_ERROR => Ok(Error::InvalidHinfoRecord),
-            ResponseCode::BADALG       => Ok(Error::InvalidAlgorithm),
-            ResponseCode::FORMAT_ERROR => Ok(Error::Truncated),
-            ResponseCode::FORMAT_ERROR => Ok(Error::Unrecognized),
-
             ResponseCode::FORMAT_ERROR => Ok(Error::FormatError),
             ResponseCode::SERVER_FAILURE => Ok(Error::ServerFailure),
             ResponseCode::NON_EXISTENT_DOMAIN => Ok(Error::NonExistentDomain),

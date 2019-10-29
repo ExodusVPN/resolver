@@ -8,33 +8,33 @@ edition = "2018"
 
 [dependencies]
 log        = "0.4"
-env_logger = { version = "0.7", default-features = false, features = ["termcolor", "atty", "humantime"] }
-bitflags   = "1.2"
-chrono     = "0.4"
-hex        = "0.4"
-base64     = "0.10"
-punycode   = "0.4"
 
-mio        = { version = "0.6", optional = true }
-openssl    = "0.10"
-native-tls = "0.2"
-lru        = "0.3"
+# Wire
+bitflags   = { version = "1.2",  optional = true }
+hex        = { version = "0.4",  optional = true }
+base64     = { version = "0.10", optional = true }
+punycode   = { version = "0.4",  optional = true }
+chrono     = { version = "0.4",  optional = true }
+
+# Resolver
+mio        = { version = "0.6",  optional = true }
+openssl    = { version = "0.10", optional = true }
+native-tls = { version = "0.2",  optional = true }
+
+[dev-dependencies]
+env_logger = { version = "0.7", default-features = false, features = ["termcolor", "atty", "humantime"] }
 
 [features]
 default  = [
     "wire",
-    "proto-tcp", "proto-udp", "proto-tls",
-    "mio",
+    "resolver",
 ]
 nightly  = [ ]
 vendored = [ "openssl/vendored" ]
-wire     = [ ]
-# wire     = [ "bitflags", "punycode", "base64", "hex" ]
 
-# proto     = [ "mio", "openssl", "native-tls" ]
-client    = [ ]
-server    = [ ]
-
-proto-tcp = [ "mio" ]
-proto-udp = [ "mio" ]
-proto-tls = [ "mio" ]
+wire     = [ "bitflags", "punycode", "base64", "hex", "chrono" ]
+resolver = [ "wire", "dnssec-validator", "mio", "proto-tcp", "proto-udp", "proto-tls" ]
+proto-tcp = [ ]
+proto-udp = [ ]
+proto-tls = [ "native-tls" ]
+dnssec-validator = [ "openssl" ]

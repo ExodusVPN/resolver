@@ -1,6 +1,6 @@
 use crate::error::Error;
-use crate::MAXIMUM_LABEL_SIZE;
-use crate::MAXIMUM_NAMES_SIZE;
+use crate::wire::MAXIMUM_LABEL_SIZE;
+use crate::wire::MAXIMUM_NAMES_SIZE;
 
 use std::hash::Hasher;
 use std::hash::BuildHasher;
