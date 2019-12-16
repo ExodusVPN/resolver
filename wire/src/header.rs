@@ -4,6 +4,10 @@ use crate::opcode::OpCode;
 use crate::rcode::ResponseCode;
 use crate::record::Record;
 use crate::record::ClientSubnet;
+use crate::record::OPT;
+use crate::record::OptAttr;
+use crate::edns::EDNS_V0;
+use crate::edns::EDNSFlags;
 
 use crate::ser::Serializer;
 use crate::ser::Serialize;
@@ -451,8 +455,8 @@ pub struct Question {
 pub struct Header {
     pub id: u16,
     pub flags: HeaderFlags,     // u8
-    pub opcode: OpCode,         // u8
-    pub rcode: ResponseCode,    // u16
+    // pub opcode: OpCode,         // u8
+    // pub rcode: ResponseCode,    // u16
     pub qdcount: u16,
     pub ancount: u16,
     pub nscount: u16,
@@ -502,6 +506,27 @@ impl Serialize for Question {
 }
 
 
+// 4.1.1. Header section format
+// https://tools.ietf.org/html/rfc1035#section-4.1.1
+// 
+// The header contains the following fields:
+// 
+//                                     1  1  1  1  1  1
+//       0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
+//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+//     |                      ID                       |
+//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+//     |QR|   Opcode  |AA|TC|RD|RA|   Z    |   RCODE   |
+//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+//     |                    QDCOUNT                    |
+//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+//     |                    ANCOUNT                    |
+//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+//     |                    NSCOUNT                    |
+//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+//     |                    ARCOUNT                    |
+//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+// 
 impl Deserialize for Request {
     fn deserialize(deserializer: &mut Deserializer) -> Result<Self, io::Error> {
         unimplemented!();
@@ -510,6 +535,53 @@ impl Deserialize for Request {
 
 impl Serialize for Request {
     fn serialize(&self, serializer: &mut Serializer) -> Result<(), io::Error> {
-        unimplemented!()
+        let mut hdr_flags: HeaderFlags = self.flags.into();
+        hdr_flags.set_opcode(self.opcode);
+        hdr_flags.set_rcode(ResponseCode::OK);
+        
+        let is_dnssec_ok = if self.flags.contains(ReprFlags::DO) { true } else { false };
+        self.id.serialize(serializer)?;
+        hdr_flags.bits().serialize(serializer)?;
+
+        let qdcount = 1u16;
+        let ancount = 0u16;
+        let nscount = 0u16;
+        let arcount = if !is_dnssec_ok && self.client_subnet.is_none() { 0u16 } else { 1 };
+
+        qdcount.serialize(serializer)?;
+        ancount.serialize(serializer)?;
+        nscount.serialize(serializer)?;
+        arcount.serialize(serializer)?;
+
+        // ===== QUESTION ======
+        self.question.serialize(serializer)?;
+
+        // ===== EDNS =====
+        if arcount == 0 {
+            return Ok(());
+        }
+        debug_assert_eq!(arcount, 1);
+
+
+        let edns_flags = if is_dnssec_ok { EDNSFlags::DO } else { EDNSFlags::empty() };
+        let ends_opt_attrs = 
+            match &self.client_subnet {
+                Some(client_subnet) => vec![ OptAttr::ECS(client_subnet.clone()) ],
+                None => Vec::new(),
+            };
+
+        let root_name = String::new();
+        let opt = OPT {
+            name: root_name,
+            udp_size: 512,
+            rcode: 0,
+            version: EDNS_V0,
+            flags: edns_flags,
+            attrs: ends_opt_attrs,
+        };
+        let opt_record = Record::OPT(opt);
+        opt_record.serialize(serializer)?;
+
+        Ok(())
     }
 }
