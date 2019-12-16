@@ -5,6 +5,14 @@ use crate::rcode::ResponseCode;
 use crate::record::Record;
 use crate::record::ClientSubnet;
 
+use crate::ser::Serializer;
+use crate::ser::Serialize;
+use crate::de::Deserializer;
+use crate::de::Deserialize;
+
+
+use std::io;
+
 
 pub const HEADER_SIZE: usize = 12;
 
@@ -287,30 +295,96 @@ impl HeaderFlags {
 }
 
 
-// 4.1.1. Header section format
-// https://tools.ietf.org/html/rfc1035#section-4.1.1
-// 
-// The header contains the following fields:
-// 
-//                                     1  1  1  1  1  1
-//       0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |                      ID                       |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |QR|   Opcode  |AA|TC|RD|RA|   Z    |   RCODE   |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |                    QDCOUNT                    |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |                    ANCOUNT                    |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |                    NSCOUNT                    |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |                    ARCOUNT                    |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-// 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Header {
+bitflags! {
+    pub struct ReprFlags: u8 {
+        const QR = 0b_1000_0000; // Response
+        const AA = 0b_0100_0000; // Authoritative Answer
+        const TC = 0b_0010_0000; // TrunCation
+        const RD = 0b_0001_0000; // Recursion Desired
+        const RA = 0b_0000_1000; // Recursion Available
+        const DO = 0b_0000_0100; // DNSSEC OK
+        const AD = 0b_0000_0010; // Authentic Data    RFC4035, RFC6840, RFC Errata 4924
+        const CD = 0b_0000_0001; // Checking Disabled RFC4035, RFC6840, RFC Errata 4927
+    }
+}
 
+impl ReprFlags {
+    pub fn new_unchecked(bits: u8) -> Self {
+        unsafe {
+            Self::from_bits_unchecked(bits)
+        }
+    }
+}
+
+impl Default for ReprFlags {
+    fn default() -> Self {
+        Self::RD | Self::DO
+    }
+}
+
+impl Into<HeaderFlags> for ReprFlags {
+    fn into(self) -> HeaderFlags {
+        let mut flags = HeaderFlags::empty();
+        
+        if self.contains(ReprFlags::QR) {
+            flags |= HeaderFlags::QR_RES;
+        }
+
+        if self.contains(ReprFlags::AA) {
+            flags |= HeaderFlags::AA;
+        }
+
+        if self.contains(ReprFlags::TC) {
+            flags |= HeaderFlags::TC;
+        }
+
+        if self.contains(ReprFlags::RD) {
+            flags |= HeaderFlags::RD;
+        }
+
+        if self.contains(ReprFlags::RA) {
+            flags |= HeaderFlags::RA;
+        }
+
+        if self.contains(ReprFlags::AD) {
+            flags |= HeaderFlags::AD;
+        }
+
+        if self.contains(ReprFlags::CD) {
+            flags |= HeaderFlags::CD;
+        }
+
+        flags
+    }
+}
+
+impl From<HeaderFlags> for ReprFlags {
+    fn from(val: HeaderFlags) -> ReprFlags {
+        let mut flags = ReprFlags::empty();
+        if val.qr() {
+            flags |= ReprFlags::QR;
+        }
+        if val.aa() {
+            flags |= ReprFlags::AA;
+        }
+        if val.tc() {
+            flags |= ReprFlags::TC;
+        }
+        if val.rd() {
+            flags |= ReprFlags::RD;
+        }
+        if val.ra() {
+            flags |= ReprFlags::RA;
+        }
+        if val.ad() {
+            flags |= ReprFlags::AD;
+        }
+        if val.cd() {
+            flags |= ReprFlags::CD;
+        }
+
+        flags
+    }
 }
 
 // 4.1.2. Question section format
@@ -345,97 +419,6 @@ pub struct Header {
 //                 TYPE field, together with some more general codes which
 //                 can match more than one type of RR.
 // 
-
-bitflags! {
-    pub struct ReprFlags: u8 {
-        const QR = 0b_1000_0000; // Response
-        const AA = 0b_0100_0000; // Authoritative Answer
-        const TC = 0b_0010_0000; // TrunCation
-        const RD = 0b_0001_0000; // Recursion Desired
-        const RA = 0b_0000_1000; // Recursion Available
-        const DO = 0b_0000_0100; // DNSSEC OK
-        const AD = 0b_0000_0010; // Authentic Data    RFC4035, RFC6840, RFC Errata 4924
-        const CD = 0b_0000_0001; // Checking Disabled RFC4035, RFC6840, RFC Errata 4927
-    }
-}
-
-impl ReprFlags {
-    pub fn new_unchecked(bits: u8) -> Self {
-        unsafe {
-            Self::from_bits_unchecked(bits)
-        }
-    }
-    
-    #[inline]
-    pub fn to_header_flags(&self) -> HeaderFlags {
-        let mut flags = HeaderFlags::empty();
-        
-        if self.contains(Self::QR) {
-            flags |= HeaderFlags::QR_RES;
-        }
-
-        if self.contains(Self::AA) {
-            flags |= HeaderFlags::AA;
-        }
-
-        if self.contains(Self::TC) {
-            flags |= HeaderFlags::TC;
-        }
-
-        if self.contains(Self::RD) {
-            flags |= HeaderFlags::RD;
-        }
-
-        if self.contains(Self::RA) {
-            flags |= HeaderFlags::RA;
-        }
-
-        if self.contains(Self::AD) {
-            flags |= HeaderFlags::AD;
-        }
-
-        if self.contains(Self::CD) {
-            flags |= HeaderFlags::CD;
-        }
-
-        flags
-    }
-
-    #[inline]
-    pub fn from_header_flags(header_flags: &HeaderFlags) -> Self {
-        let mut flags = Self::empty();
-        if header_flags.qr() {
-            flags |= ReprFlags::QR;
-        }
-        if header_flags.aa() {
-            flags |= ReprFlags::AA;
-        }
-        if header_flags.tc() {
-            flags |= ReprFlags::TC;
-        }
-        if header_flags.rd() {
-            flags |= ReprFlags::RD;
-        }
-        if header_flags.ra() {
-            flags |= ReprFlags::RA;
-        }
-        if header_flags.ad() {
-            flags |= ReprFlags::AD;
-        }
-        if header_flags.cd() {
-            flags |= ReprFlags::CD;
-        }
-
-        flags
-    }
-}
-
-impl Default for ReprFlags {
-    fn default() -> Self {
-        Self::RD | Self::DO
-    }
-}
-
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Question {
     pub name: String,
@@ -443,11 +426,44 @@ pub struct Question {
     pub class: Class,
 }
 
+// 4.1.1. Header section format
+// https://tools.ietf.org/html/rfc1035#section-4.1.1
+// 
+// The header contains the following fields:
+// 
+//                                     1  1  1  1  1  1
+//       0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
+//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+//     |                      ID                       |
+//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+//     |QR|   Opcode  |AA|TC|RD|RA|   Z    |   RCODE   |
+//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+//     |                    QDCOUNT                    |
+//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+//     |                    ANCOUNT                    |
+//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+//     |                    NSCOUNT                    |
+//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+//     |                    ARCOUNT                    |
+//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+// 
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Header {
+    pub id: u16,
+    pub flags: HeaderFlags,     // u8
+    pub opcode: OpCode,         // u8
+    pub rcode: ResponseCode,    // u16
+    pub qdcount: u16,
+    pub ancount: u16,
+    pub nscount: u16,
+    pub arcount: u16,
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Request {
     pub id: u16,
     pub flags: ReprFlags,     // u8
-    pub opcode: OpCode, // u8
+    pub opcode: OpCode,       // u8
     pub client_subnet: Option<ClientSubnet>,
     pub question: Question,
 }
@@ -455,7 +471,7 @@ pub struct Request {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Response {
     pub id: u16,
-    pub flags: ReprFlags, // u8
+    pub flags: ReprFlags,     // u8
     pub opcode: OpCode,
     pub rcode: ResponseCode,
     pub client_subnet: Option<ClientSubnet>,
@@ -465,58 +481,35 @@ pub struct Response {
     pub additionals: Vec<Record>,
 }
 
+impl Deserialize for Question {
+    fn deserialize(deserializer: &mut Deserializer) -> Result<Self, io::Error> {
+        let name = String::deserialize(deserializer)?;
+        let kind = Kind(u16::deserialize(deserializer)?);
+        let class = Class(u16::deserialize(deserializer)?);
+
+        Ok(Question { name, kind, class, })
+    }
+}
+
+impl Serialize for Question {
+    fn serialize(&self, serializer: &mut Serializer) -> Result<(), io::Error> {
+        self.name.serialize(serializer)?;
+        self.kind.0.serialize(serializer)?;
+        self.class.0.serialize(serializer)?;
+
+        Ok(())
+    }
+}
 
 
-// 4.1.3. Resource record format
-// https://tools.ietf.org/html/rfc1035#section-4.1.3
-// 
-// The answer, authority, and additional sections all share the same
-// format: a variable number of resource records, where the number of
-// records is specified in the corresponding count field in the header.
-// Each resource record has the following format:
-//                                     1  1  1  1  1  1
-//       0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |                                               |
-//     /                                               /
-//     /                      NAME                     /
-//     |                                               |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |                      TYPE                     |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |                     CLASS                     |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |                      TTL                      |
-//     |                                               |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |                   RDLENGTH                    |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--|
-//     /                     RDATA                     /
-//     /                                               /
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-// 
-// where:
-// 
-// NAME            a domain name to which this resource record pertains.
-// 
-// TYPE            two octets containing one of the RR type codes.  This
-//                 field specifies the meaning of the data in the RDATA
-//                 field.
-// 
-// CLASS           two octets which specify the class of the data in the
-//                 RDATA field.
-// 
-// TTL             a 32 bit unsigned integer that specifies the time
-//                 interval (in seconds) that the resource record may be
-//                 cached before it should be discarded.  Zero values are
-//                 interpreted to mean that the RR can only be used for the
-//                 transaction in progress, and should not be cached.
-// 
-// RDLENGTH        an unsigned 16 bit integer that specifies the length in
-//                 octets of the RDATA field.
-// 
-// RDATA           a variable length string of octets that describes the
-//                 resource.  The format of this information varies
-//                 according to the TYPE and CLASS of the resource record.
-//                 For example, the if the TYPE is A and the CLASS is IN,
-//                 the RDATA field is a 4 octet ARPA Internet address.
+impl Deserialize for Request {
+    fn deserialize(deserializer: &mut Deserializer) -> Result<Self, io::Error> {
+        unimplemented!();
+    }
+}
+
+impl Serialize for Request {
+    fn serialize(&self, serializer: &mut Serializer) -> Result<(), io::Error> {
+        unimplemented!()
+    }
+}

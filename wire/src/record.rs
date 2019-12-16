@@ -442,12 +442,12 @@ pub enum OptAttr {
 // ======= pseudo resource records ========
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct OPT {
-    pub name: String,          // MUST be 0 (root domain)
-    pub udp_size: u16,         // requestor's UDP payload size
-    pub rcode: u8,             // extended RCODE
-    pub version: u8,           // version
+    pub name: String,           // MUST be 0 (root domain)
+    pub udp_size: u16,          // requestor's UDP payload size
+    pub rcode: u8,              // extended RCODE，高 8 位, 低 4 位在 DNS MESSAGE HEADER 里面。
+    pub version: u8,            // version
     pub flags: edns::EDNSFlags, // flags
-    pub attrs: Vec<OptAttr>,   // RDATA
+    pub attrs: Vec<OptAttr>,    // RDATA
 }
 
 impl OPT {
