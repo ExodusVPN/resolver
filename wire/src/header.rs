@@ -469,7 +469,7 @@ pub struct Request {
     pub flags: ReprFlags,     // u8
     pub opcode: OpCode,       // u8
     pub client_subnet: Option<ClientSubnet>,
-    pub question: Question,
+    pub questions: Vec<Question>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -479,7 +479,7 @@ pub struct Response {
     pub opcode: OpCode,
     pub rcode: ResponseCode,
     pub client_subnet: Option<ClientSubnet>,
-    pub question: Question,
+    pub questions: Vec<Question>,
     pub answers: Vec<Record>,
     pub authorities: Vec<Record>,
     pub additionals: Vec<Record>,
@@ -529,7 +529,137 @@ impl Serialize for Question {
 // 
 impl Deserialize for Request {
     fn deserialize(deserializer: &mut Deserializer) -> Result<Self, io::Error> {
-        unimplemented!();
+        let id = u16::deserialize(deserializer)?;
+        let flags = HeaderFlags::new_unchecked(u16::deserialize(deserializer)?);
+        debug!("header flags {:?}", flags);
+
+        let opcode = flags.opcode();
+        let rcode = flags.rcode();
+        let mut repr_flags: ReprFlags = flags.into();
+
+        let mut client_subnet = None;
+
+        let qdcount = u16::deserialize(deserializer)?;
+        let ancount = u16::deserialize(deserializer)?;
+        let nscount = u16::deserialize(deserializer)?;
+        let arcount = u16::deserialize(deserializer)?;
+
+        let mut questions = Vec::new();
+        for _ in 0..qdcount {
+            let question = Question::deserialize(deserializer)?;
+            questions.push(question);
+        }
+        
+        let mut answers = Vec::new();
+        for _ in 0..ancount {
+            let rr = Record::deserialize(deserializer)?;
+            answers.push(rr);
+        }
+
+        let mut authorities = Vec::new();
+        for _ in 0..nscount {
+            let rr = Record::deserialize(deserializer)?;
+            authorities.push(rr);
+        }
+
+        let mut additionals = Vec::new();
+        for _ in 0..arcount {
+            let rr = Record::deserialize(deserializer)?;
+            match &rr {
+                &Record::OPT(ref opt) => {
+                    if opt.flags.contains(EDNSFlags::DO) {
+                        repr_flags |= ReprFlags::DO;
+                    }
+
+                    for attr in opt.attrs.iter() {
+                        match attr {
+                            OptAttr::ECS(ecs) => {
+                                client_subnet = Some(ecs.clone());
+                            },
+                        }
+                    }
+                },
+                _ => { }
+            }
+            additionals.push(rr);
+        }
+
+        Ok(Request {
+            id,
+            flags: repr_flags,
+            opcode,
+            client_subnet,
+            questions,
+        })
+    }
+}
+
+impl Deserialize for Response {
+    fn deserialize(deserializer: &mut Deserializer) -> Result<Self, io::Error> {
+        let id = u16::deserialize(deserializer)?;
+        let flags = HeaderFlags::new_unchecked(u16::deserialize(deserializer)?);
+        let opcode = flags.opcode();
+        let rcode = flags.rcode();
+        let mut repr_flags: ReprFlags = flags.into();
+
+        let mut client_subnet = None;
+
+        let qdcount = u16::deserialize(deserializer)?;
+        let ancount = u16::deserialize(deserializer)?;
+        let nscount = u16::deserialize(deserializer)?;
+        let arcount = u16::deserialize(deserializer)?;
+
+        let mut questions = Vec::new();
+        for _ in 0..qdcount {
+            let question = Question::deserialize(deserializer)?;
+            questions.push(question);
+        }
+        
+        let mut answers = Vec::new();
+        for _ in 0..ancount {
+            let rr = Record::deserialize(deserializer)?;
+            answers.push(rr);
+        }
+
+        let mut authorities = Vec::new();
+        for _ in 0..nscount {
+            let rr = Record::deserialize(deserializer)?;
+            authorities.push(rr);
+        }
+
+        let mut additionals = Vec::new();
+        for _ in 0..arcount {
+            let rr = Record::deserialize(deserializer)?;
+            match &rr {
+                &Record::OPT(ref opt) => {
+                    if opt.flags.contains(EDNSFlags::DO) {
+                        repr_flags |= ReprFlags::DO;
+                    }
+
+                    for attr in opt.attrs.iter() {
+                        match attr {
+                            OptAttr::ECS(ecs) => {
+                                client_subnet = Some(ecs.clone());
+                            },
+                        }
+                    }
+                },
+                _ => { }
+            }
+            additionals.push(rr);
+        }
+
+        Ok(Response {
+            id,
+            flags: repr_flags,
+            opcode,
+            rcode,
+            client_subnet,
+            questions,
+            answers,
+            authorities,
+            additionals
+        })
     }
 }
 
@@ -543,7 +673,7 @@ impl Serialize for Request {
         self.id.serialize(serializer)?;
         hdr_flags.bits().serialize(serializer)?;
 
-        let qdcount = 1u16;
+        let qdcount = self.questions.len();
         let ancount = 0u16;
         let nscount = 0u16;
         let arcount = if !is_dnssec_ok && self.client_subnet.is_none() { 0u16 } else { 1 };
@@ -554,7 +684,9 @@ impl Serialize for Request {
         arcount.serialize(serializer)?;
 
         // ===== QUESTION ======
-        self.question.serialize(serializer)?;
+        for question in self.questions.iter() {
+            question.serialize(serializer)?;
+        }
 
         // ===== EDNS =====
         if arcount == 0 {

@@ -12,6 +12,12 @@ pub struct Deserializer<'a> {
 }
 
 impl<'a> Deserializer<'a> {
+    pub fn new(buf: &'a [u8]) -> Self {
+        Deserializer {
+            cursor: Cursor::new(buf),
+        }
+    }
+
     #[inline]
     #[cfg(target_pointer_width = "32")]
     pub fn position(&self) -> usize {

@@ -16,6 +16,13 @@ pub struct Serializer<'a> {
 }
 
 impl<'a> Serializer<'a> {
+    pub fn new(buf: &'a mut [u8]) -> Self {
+        Serializer {
+            cursor: Cursor::new(buf),
+            names: HashMap::new(),
+        }
+    }
+
     #[inline]
     #[cfg(target_pointer_width = "32")]
     pub fn position(&self) -> usize {
