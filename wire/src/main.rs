@@ -9,15 +9,14 @@ use tokio::net::UdpSocket;
 use tokio::net::TcpListener;
 use tokio::io::AsyncReadExt;
 
+use wire::kind::Kind;
+use wire::class::Class;
+use wire::opcode::OpCode;
 use wire::header::Request;
 use wire::header::Question;
 use wire::header::ReprFlags;
 use wire::header::Response;
 use wire::header::HeaderFlags;
-use wire::kind::Kind;
-use wire::class::Class;
-use wire::opcode::OpCode;
-
 use wire::ser::Serialize;
 use wire::ser::Serializer;
 use wire::de::Deserialize;
@@ -28,16 +27,15 @@ use std::io;
 
 
 pub fn handle_req(pkt: &[u8]) {
-    let buf = [0u8; 1024*4];
-    let mut deserializer = Deserializer::new(&buf);
+    let mut deserializer = Deserializer::new(pkt);
     let ret = Request::deserialize(&mut deserializer);
     println!("{:?}", ret);
 }
 
 pub async fn run_udp_server() -> Result<(), tokio::io::Error> {
     let mut buf = [0u8; 1500];
-    let mut listener = UdpSocket::bind("127.0.0.1:53").await?;
-    info!("[UDP] udp service running at 127.0.0.1:53 ...");
+    let mut listener = UdpSocket::bind("127.0.0.1:8000").await?;
+    info!("[UDP] udp service running at 127.0.0.1:8000 ...");
 
     loop {
         match listener.recv_from(&mut buf).await {
@@ -55,8 +53,8 @@ pub async fn run_udp_server() -> Result<(), tokio::io::Error> {
 }
 
 pub async fn run_tcp_server() -> Result<(), tokio::io::Error> {
-    let mut listener = TcpListener::bind("127.0.0.1:53").await?;
-    info!("[TCP] tcp service running at 127.0.0.1:53 ...");
+    let mut listener = TcpListener::bind("127.0.0.1:8000").await?;
+    info!("[TCP] tcp service running at 127.0.0.1:8000 ...");
     loop {
         match listener.accept().await {
             Ok((mut tcp_stream, peer_addr)) => {
@@ -104,12 +102,12 @@ pub async fn run_tcp_server() -> Result<(), tokio::io::Error> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    std::env::set_var("RUST_LOG", "trace");
+    std::env::set_var("RUST_LOG", "debug");
 
     env_logger::init();
 
     let req = Request {
-        id: 0,
+        id: 25890,
         flags: ReprFlags::default(),
         opcode: OpCode::QUERY,
         client_subnet: None,
@@ -121,12 +119,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         ],
     };
-
-    let mut rt = tokio::runtime::Runtime::new()?;
-    rt.spawn(run_tcp_server());
-    rt.block_on(run_udp_server())?;
-
     println!("{:?}", req);
+    
+    {
+        let mut buf = [0u8; 100];
+        let mut serializer = Serializer::new(&mut buf);
+        req.serialize(&mut serializer)?;
+        
+        let amt = serializer.position();
+        let data = &buf[..amt];
+        println!("AMT={:?} DATA={:?}", amt, data);
+        
+        handle_req(data);
+    }
+    
+    return Ok(());
+    
+    let mut rt = tokio::runtime::Runtime::new()?;
+    
+    let tasks = vec![ rt.spawn(run_tcp_server()), rt.spawn(run_udp_server()) ];
+    for t in tasks {
+        let ret = rt.block_on(t);
+        println!("{:?}", ret);
+    }
 
     Ok(())
 }

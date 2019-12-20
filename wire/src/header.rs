@@ -505,36 +505,15 @@ impl Serialize for Question {
     }
 }
 
-
-// 4.1.1. Header section format
-// https://tools.ietf.org/html/rfc1035#section-4.1.1
-// 
-// The header contains the following fields:
-// 
-//                                     1  1  1  1  1  1
-//       0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |                      ID                       |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |QR|   Opcode  |AA|TC|RD|RA|   Z    |   RCODE   |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |                    QDCOUNT                    |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |                    ANCOUNT                    |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |                    NSCOUNT                    |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |                    ARCOUNT                    |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-// 
 impl Deserialize for Request {
     fn deserialize(deserializer: &mut Deserializer) -> Result<Self, io::Error> {
         let id = u16::deserialize(deserializer)?;
         let flags = HeaderFlags::new_unchecked(u16::deserialize(deserializer)?);
-        debug!("header flags {:?}", flags);
+        debug!("DE-header-flags={:?}", flags);
 
         let opcode = flags.opcode();
-        let rcode = flags.rcode();
+        let mut rcode = flags.rcode();
+
         let mut repr_flags: ReprFlags = flags.into();
 
         let mut client_subnet = None;
@@ -543,30 +522,53 @@ impl Deserialize for Request {
         let ancount = u16::deserialize(deserializer)?;
         let nscount = u16::deserialize(deserializer)?;
         let arcount = u16::deserialize(deserializer)?;
+        debug!("DE-REQ qdcount={} ancount={} nscount={} arcount={}", qdcount, ancount, nscount, arcount);
 
+        println!("position: {:?}", deserializer.position());
         let mut questions = Vec::new();
-        for _ in 0..qdcount {
+        for i in 0..qdcount {
+            println!("qdcount idx={:?}", i);
             let question = Question::deserialize(deserializer)?;
+            println!("{:?}", question);
             questions.push(question);
         }
         
+        println!("position: {:?}", deserializer.position());
         let mut answers = Vec::new();
         for _ in 0..ancount {
+            println!("ancount idx");
             let rr = Record::deserialize(deserializer)?;
             answers.push(rr);
         }
 
+        println!("position: {:?}", deserializer.position());
         let mut authorities = Vec::new();
         for _ in 0..nscount {
+            println!("nscount idx");
             let rr = Record::deserialize(deserializer)?;
             authorities.push(rr);
         }
 
+        println!("position: {:?}", deserializer.position());
         let mut additionals = Vec::new();
-        for _ in 0..arcount {
+        for i in 0..arcount {
+            println!("arcount idx {:?}", i);
+            
+            let buf = deserializer.get_ref();
+            let start = deserializer.position();
+            let rdata = &buf[start..];
+            println!("{:?}", rdata);
+
             let rr = Record::deserialize(deserializer)?;
+            println!("rr: {:?}", rr);
+
             match &rr {
                 &Record::OPT(ref opt) => {
+                    println!("{:?}", opt);
+                    if opt.rcode > 0 {
+                        rcode.extend_hi(opt.rcode);
+                    }
+
                     if opt.flags.contains(EDNSFlags::DO) {
                         repr_flags |= ReprFlags::DO;
                     }
@@ -584,6 +586,7 @@ impl Deserialize for Request {
             additionals.push(rr);
         }
 
+        println!("position: {:?}", deserializer.position());
         Ok(Request {
             id,
             flags: repr_flags,
@@ -669,22 +672,31 @@ impl Serialize for Request {
         hdr_flags.set_opcode(self.opcode);
         hdr_flags.set_rcode(ResponseCode::OK);
         
+        debug!("SER HDR-FLAGS: {:?}", hdr_flags);
+
         let is_dnssec_ok = if self.flags.contains(ReprFlags::DO) { true } else { false };
         self.id.serialize(serializer)?;
         hdr_flags.bits().serialize(serializer)?;
 
-        let qdcount = self.questions.len();
-        let ancount = 0u16;
-        let nscount = 0u16;
-        let arcount = if !is_dnssec_ok && self.client_subnet.is_none() { 0u16 } else { 1 };
+        let questions_len = self.questions.len();
+        if questions_len > std::u16::MAX as usize {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid questions len."));
+        }
+
+        let qdcount: u16 = questions_len as u16;
+        let ancount: u16 = 0u16;
+        let nscount: u16 = 0u16;
+        let arcount: u16 = if !is_dnssec_ok && self.client_subnet.is_none() { 0u16 } else { 1 };
 
         qdcount.serialize(serializer)?;
         ancount.serialize(serializer)?;
         nscount.serialize(serializer)?;
         arcount.serialize(serializer)?;
+        debug!("SER-REQ qdcount={} ancount={} nscount={} arcount={}", qdcount, ancount, nscount, arcount);
 
         // ===== QUESTION ======
         for question in self.questions.iter() {
+            debug!("ques: {:?}", question);
             question.serialize(serializer)?;
         }
 
@@ -693,7 +705,6 @@ impl Serialize for Request {
             return Ok(());
         }
         debug_assert_eq!(arcount, 1);
-
 
         let edns_flags = if is_dnssec_ok { EDNSFlags::DO } else { EDNSFlags::empty() };
         let ends_opt_attrs = 

@@ -384,6 +384,7 @@ impl Serialize for &str {
         // Cache
         serializer.names.insert(key, name_pos as u16);
 
+        debug!("ser domain name amt: {}", amt);
         Ok(())
     }
 }
@@ -425,4 +426,29 @@ fn write_label(serializer: &mut Serializer, label: &str) -> Result<usize, io::Er
     buffer[label_len_pos] = label.len() as u8;
 
     Ok(label.len() + 1)
+}
+
+
+
+#[test]
+fn test_domain_name() {
+    let mut buffer = [0u8; 512];
+
+    let mut serializer = Serializer::new(&mut buffer);
+    assert!("www.中国".serialize(&mut serializer).is_ok());
+    assert!("www.中国".serialize(&mut serializer).is_ok());
+    let amt = serializer.position();
+
+    assert_eq!(&buffer[..amt], &[
+        3, 119, 119, 119, 10, 120, 110, 45, 45, 102, 105, 113, 115, 56, 115, 0,
+        192, 0,
+    ]);
+    
+    
+    use crate::de::Deserializer;
+    use crate::de::Deserialize;
+    
+    let mut deserializer = Deserializer::new(&buffer);
+    assert_eq!(String::deserialize(&mut deserializer).unwrap(), "www.xn--fiqs8s".to_string());
+    assert_eq!(String::deserialize(&mut deserializer).unwrap(), "www.xn--fiqs8s".to_string());
 }

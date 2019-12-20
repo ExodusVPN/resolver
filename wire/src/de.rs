@@ -250,9 +250,11 @@ impl Deserialize for String {
     fn deserialize(deserializer: &mut Deserializer) -> Result<Self, io::Error> {
         let mut output = String::new();
 
-        let amt = read_name_inner(deserializer, deserializer.position(), &mut output, 0)?;
-        deserializer.set_position(deserializer.position() + amt);
-
+        let start = deserializer.position();
+        let amt = read_name_inner(deserializer, start, &mut output, 0)?;
+        debug!("de domain name amt: {:?}  {:?}", amt, output);
+        deserializer.set_position(start + amt);
+        
         return Ok(output);
     }
 }

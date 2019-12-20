@@ -558,6 +558,11 @@ impl Deserialize for Record {
     fn deserialize(deserializer: &mut Deserializer) -> Result<Self, io::Error> {
         let name = String::deserialize(deserializer)?;
         let kind = Kind(u16::deserialize(deserializer)?);
+        
+        let offset = deserializer.position();
+        let buf = deserializer.get_ref();
+        
+        debug!("after name and kind: {:?}", &buf[offset..] );
 
         #[inline]
         fn deserialize_normal_rr(deserializer: &mut Deserializer) -> Result<(Class, u32, u16), io::Error> {
@@ -639,6 +644,7 @@ impl Deserialize for Record {
 
                 let rcode = u8::deserialize(deserializer)?;
                 let version = u8::deserialize(deserializer)?;
+                debug!("DE {:?} OPT-UDP-SIZE={:?} OPT-RCODE={:?} OPT-VER={:?}", name, udp_size, rcode, version, );
 
                 if version != edns::EDNS_V0 {
                     return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid EDNS version(must be 0)."));
@@ -898,7 +904,16 @@ impl Deserialize for Record {
                 }
             },
             _ => {
-                unimplemented!()
+                // let (class, ttl, rdlen) = deserialize_normal_rr(deserializer)?;
+                let buf = deserializer.get_ref();
+                let start = deserializer.position();
+                let rdata = &buf[start..];
+                println!("{:?} name={:?} kind={:?}", rdata, name, kind);
+
+                // debug!("DE name={:?} kind={:?} class={:?} ttl={:?} rdlen={:?} rddata={:?}", name, kind,
+                //     class, ttl, rdlen, rdata);
+
+                return Err(io::Error::new(io::ErrorKind::Other, "NotImplemented"));
             }
         }
     }
@@ -992,7 +1007,10 @@ impl Serialize for Record {
                 if !rr.name.is_empty() {
                     return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid DNS name(ROOT Name must be empty)."));
                 }
-                rr.name.serialize(serializer)?;
+
+                // rr.name.serialize(serializer)?;
+                0u8.serialize(serializer)?;
+
                 rr.udp_size.serialize(serializer)?;
                 rr.rcode.serialize(serializer)?;
                 rr.version.serialize(serializer)?;
@@ -1117,7 +1135,8 @@ impl Serialize for Record {
                 });
             },
             _ => {
-                unimplemented!()
+                debug!("SER {:?}", self);
+                return Err(io::Error::new(io::ErrorKind::Other, "NotImplemented"));
             },
         }
 
