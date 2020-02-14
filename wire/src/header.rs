@@ -531,8 +531,7 @@ impl Deserialize for Request {
     fn deserialize(deserializer: &mut Deserializer) -> Result<Self, io::Error> {
         let id = u16::deserialize(deserializer)?;
         let flags = HeaderFlags::new_unchecked(u16::deserialize(deserializer)?);
-        debug!("header flags {:?}", flags);
-
+        
         let opcode = flags.opcode();
         let rcode = flags.rcode();
         let mut repr_flags: ReprFlags = flags.into();
@@ -549,7 +548,7 @@ impl Deserialize for Request {
             let question = Question::deserialize(deserializer)?;
             questions.push(question);
         }
-        
+
         let mut answers = Vec::new();
         for _ in 0..ancount {
             let rr = Record::deserialize(deserializer)?;

@@ -558,7 +558,7 @@ impl Deserialize for Record {
     fn deserialize(deserializer: &mut Deserializer) -> Result<Self, io::Error> {
         let name = String::deserialize(deserializer)?;
         let kind = Kind(u16::deserialize(deserializer)?);
-
+        
         #[inline]
         fn deserialize_normal_rr(deserializer: &mut Deserializer) -> Result<(Class, u32, u16), io::Error> {
             let class = Class(u16::deserialize(deserializer)?);
@@ -635,7 +635,8 @@ impl Deserialize for Record {
                 Ok(Record::SOA(SOA { name, class, ttl, mname, rname, serial, refresh, retry, expire, minimum }))
             },
             Kind::OPT => {
-                let udp_size = kind.0;
+                let class = Class(u16::deserialize(deserializer)?);
+                let udp_size = class.0;
 
                 let rcode = u8::deserialize(deserializer)?;
                 let version = u8::deserialize(deserializer)?;
@@ -645,8 +646,10 @@ impl Deserialize for Record {
                 }
 
                 let flags = edns::EDNSFlags::new_unchecked(u16::deserialize(deserializer)?);
+
                 let mut rdlen = u16::deserialize(deserializer)?;
                 let mut attrs: Vec<OptAttr> = Vec::new();
+                
                 while rdlen > 4 {
                     let opt_code = edns::OptionCode(u16::deserialize(deserializer)?);
                     let opt_len = u16::deserialize(deserializer)?;

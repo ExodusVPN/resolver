@@ -28,8 +28,7 @@ use std::io;
 
 
 pub fn handle_req(pkt: &[u8]) {
-    let buf = [0u8; 1024*4];
-    let mut deserializer = Deserializer::new(&buf);
+    let mut deserializer = Deserializer::new(&pkt);
     let ret = Request::deserialize(&mut deserializer);
     println!("{:?}", ret);
 }
@@ -104,10 +103,12 @@ pub async fn run_tcp_server() -> Result<(), tokio::io::Error> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    std::env::set_var("RUST_LOG", "trace");
+    std::env::set_var("RUST_LOG", "debug");
 
     env_logger::init();
-
+    
+    println!("Record Size: {:?}", std::mem::size_of::<wire::record::Record>() );
+    
     let req = Request {
         id: 0,
         flags: ReprFlags::default(),
