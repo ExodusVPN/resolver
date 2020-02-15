@@ -15,15 +15,11 @@ bitflags   = "1.2"
 base64     = "0.10"
 punycode   = "0.4"
 chrono     = "0.4"
-
-[dependencies.tokio]
-version  = "0.2"
-features = [
-    "full"
-]
-
-
+tokio      = "0.2"
 
 [features]
-default  = [ ]
+default  = [
+    "tokio/full",
+]
+
 nightly  = [ ]

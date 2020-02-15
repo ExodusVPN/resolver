@@ -1,3 +1,5 @@
+#![allow(unused_imports)]
+
 #[macro_use]
 extern crate log;
 extern crate env_logger;
@@ -9,15 +11,14 @@ use tokio::net::UdpSocket;
 use tokio::net::TcpListener;
 use tokio::io::AsyncReadExt;
 
+use wire::kind::Kind;
+use wire::class::Class;
+use wire::opcode::OpCode;
 use wire::header::Request;
 use wire::header::Question;
 use wire::header::ReprFlags;
 use wire::header::Response;
 use wire::header::HeaderFlags;
-use wire::kind::Kind;
-use wire::class::Class;
-use wire::opcode::OpCode;
-
 use wire::ser::Serialize;
 use wire::ser::Serializer;
 use wire::de::Deserialize;
@@ -102,13 +103,20 @@ pub async fn run_tcp_server() -> Result<(), tokio::io::Error> {
     }
 }
 
+async fn run_server() -> Result<(), tokio::io::Error> {
+    try_join!(
+        run_tcp_server(),
+        run_udp_server()
+    ).map(|(_ret1, _ret2)| ())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::env::set_var("RUST_LOG", "debug");
 
     env_logger::init();
-    
+
     println!("Record Size: {:?}", std::mem::size_of::<wire::record::Record>() );
-    
+
     let req = Request {
         id: 0,
         flags: ReprFlags::default(),
@@ -123,11 +131,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ],
     };
 
-    let mut rt = tokio::runtime::Runtime::new()?;
-    rt.spawn(run_tcp_server());
-    rt.block_on(run_udp_server())?;
-
     println!("{:?}", req);
+
+    let mut rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(run_server())?;
 
     Ok(())
 }

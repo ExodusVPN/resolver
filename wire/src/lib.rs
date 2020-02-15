@@ -4,6 +4,9 @@
 extern crate log;
 #[macro_use]
 extern crate bitflags;
+extern crate base64;
+extern crate punycode;
+extern crate chrono;
 
 
 /// 255 octets or less

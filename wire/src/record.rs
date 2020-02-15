@@ -649,7 +649,7 @@ impl Deserialize for Record {
 
                 let mut rdlen = u16::deserialize(deserializer)?;
                 let mut attrs: Vec<OptAttr> = Vec::new();
-                
+
                 while rdlen > 4 {
                     let opt_code = edns::OptionCode(u16::deserialize(deserializer)?);
                     let opt_len = u16::deserialize(deserializer)?;
@@ -1119,11 +1119,366 @@ impl Serialize for Record {
                     rr.value.as_bytes().serialize(serializer)?;
                 });
             },
+            #[allow(unreachable_patterns)]
             _ => {
                 unimplemented!()
             },
         }
 
         Ok(())
+    }
+}
+
+
+const DNS_DATETIME_FORMAT: &str = "%Y%m%d%H%M%S";
+// 1573557530 --> "20191026050000"
+pub fn timestamp_to_datetime(timestamp: u32) -> String {
+    let native_dt = chrono::NaiveDateTime::from_timestamp(timestamp as i64, 0);
+    let datetime = chrono::DateTime::<chrono::Utc>::from_utc(native_dt, chrono::Utc);
+    format!("{}", datetime.format(DNS_DATETIME_FORMAT))
+}
+
+// "20191026050000" --> 1573557530
+pub fn datetime_to_timestamp(s: &str) -> Result<u32, Error> {
+    let timestamp: i64 = chrono::TimeZone::datetime_from_str(&chrono::Utc, s, DNS_DATETIME_FORMAT)
+        .map_err(|_| Error::from(ErrorKind::FormatError))?
+        .timestamp();
+    
+    if timestamp < 0 || timestamp > std::u32::MAX as i64 {
+        return Err(Error::from(ErrorKind::FormatError));
+    }
+    
+    let timestamp = timestamp as u32;
+    
+    Ok(timestamp)
+}
+
+fn decode_hex(s: &str) -> Result<Vec<u8>, Error> {
+    if s.len() % 2 != 0 {
+        return Err(Error::new(ErrorKind::FormatError, "invalid hex sequence length"));
+    }
+
+    fn val(c: u8) -> Result<u8, Error> {
+        match c {
+            b'A'..=b'F' => Ok(c - b'A' + 10),
+            b'a'..=b'f' => Ok(c - b'a' + 10),
+            b'0'..=b'9' => Ok(c - b'0'),
+            _ => Err(Error::new(ErrorKind::FormatError, "invalid hex character")),
+        }
+    }
+
+    let mut out = Vec::with_capacity(s.len() / 2);
+    for chunk in s.as_bytes().chunks(2) {
+        let a = chunk[0];
+        let b = chunk[1];
+        let v = val(a)? << 4 | val(b)?;
+        out.push(v);
+    }
+
+    Ok(out)
+}
+
+impl std::str::FromStr for Record {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // 支持解析的 Kinds
+        // ['A', 'AAAA', 'DNSKEY', 'DS', 'NS', 'NSEC', 'RRSIG', 'SOA']
+        // 
+        // https://tools.ietf.org/html/rfc1035#section-5.1
+        // 两种文本格式:
+        //     1. DOMAIN_NAME [<TTL>] [<class>] <type> <RDATA>
+        //     2. DOMAIN_NAME [<class>] [<TTL>] <type> <RDATA>
+        // 这里支持的是第一种格式.
+        // 
+        let bytes = s.as_bytes();
+
+        let mut name: Option<String> = None;
+        let mut kind: Option<Kind> = None;
+        let mut class: Option<Class> = None;
+        let mut ttl: Option<u32> = None;
+        let mut rdata: Option<&str> = None;
+
+        let mut offset = 0usize;
+        let mut idx = 0usize;
+        while offset < bytes.len() {
+            let ch = bytes[offset];
+            if ch != b'\t' {
+                let start = offset;
+                offset += 1;
+                while offset < bytes.len() {
+                    if bytes[offset] == b'\t' {
+                        break;
+                    } else {
+                        offset += 1;
+                    }
+                }
+                
+                assert!(offset == bytes.len() || bytes[offset] == b'\t');
+                
+                let end = offset;
+                let data = &s[start..end];
+                if idx == 0 {
+                    // Domain Name
+                    let mut domain_name = s[start..end].to_lowercase();
+                    if !domain_name.ends_with('.') {
+                        return Err(Error::new(ErrorKind::FormatError, format!("Invalid DNS Name field: {:?} ", domain_name)));
+                    }
+
+                    domain_name.pop();
+
+                    name = Some(domain_name);
+                    
+                } else if idx == 1 {
+                    // TTL
+                    match data.parse::<u32>() {
+                        Ok(n) => {
+                            ttl = Some(n);
+                        },
+                        Err(_) => {
+                            return Err(Error::new(ErrorKind::FormatError, format!("Invalid DNS TTL field: {:?} ", data)));
+                        }
+                    }
+                } else if idx == 2 {
+                    // Class
+                    match data.parse::<Class>() {
+                        Ok(v) => {
+                            class = Some(v);
+                        },
+                        Err(_) => {
+                            return Err(Error::new(ErrorKind::FormatError, format!("Invalid DNS Class field: {:?} ", data)));
+                        }
+                    }
+                } else if idx == 3 {
+                    // Kind (Type)
+                    match data.parse::<Kind>() {
+                        Ok(v) => {
+                            kind = Some(v);
+                        },
+                        Err(_) => {
+                            return Err(Error::new(ErrorKind::FormatError, format!("Invalid DNS Type field: {:?} ", data)));
+                        }
+                    }
+                } else if idx == 4 {
+                    // Data
+                    rdata = Some(data);
+                } else {
+                    unreachable!();
+                }
+                
+                idx += 1;
+            } else {
+                offset += 1;
+            }
+        }
+
+        let (name, kind, class, ttl, rdata) = match (name, kind, class, ttl, rdata) {
+            (Some(name), Some(kind), Some(class), Some(ttl), Some(rdata)) => (name, kind, class, ttl, rdata),
+            _ => return Err(Error::new(ErrorKind::FormatError, "Invalid DNS header field.")),
+        };
+
+        match kind {
+            Kind::A => {
+                let v = rdata.parse::<Ipv4Addr>()
+                    .map_err(|e| Error::new(ErrorKind::FormatError, e))?;
+                Ok(Record::A(A { name, class, ttl, value: v }))
+            },
+            Kind::AAAA => {
+                let v = rdata.parse::<Ipv6Addr>()
+                    .map_err(|e| Error::new(ErrorKind::FormatError, e))?;
+                Ok(Record::AAAA(AAAA { name, class, ttl, value: v }))
+            },
+            Kind::NS => {
+                let mut v = rdata.to_string();
+                if v.ends_with('.') {
+                    v.pop();
+                }
+                Ok(Record::NS(NS { name, class, ttl, value: v }))
+            },
+            Kind::DS => {
+                // "40387 8 2 F2A6E4458136145067FCA10141180BAC9FD4CA768908707D98E5E2412039A1E3"
+                let mut tmp = rdata.split(' ');
+                let key_tag = tmp.next()
+                                    .ok_or(Error::from(ErrorKind::FormatError))?
+                                    .parse::<u16>()
+                                    .map_err(|e| Error::new(ErrorKind::FormatError, e))?;
+                let algorithm = tmp.next()
+                                    .ok_or(Error::from(ErrorKind::FormatError))?
+                                    .parse::<u8>()
+                                    .map_err(|e| Error::new(ErrorKind::FormatError, e))?;
+                let algorithm = dnssec::Algorithm(algorithm);
+
+                let digest_type = tmp.next()
+                                    .ok_or(Error::from(ErrorKind::FormatError))?
+                                    .parse::<u8>()
+                                    .map_err(|e| Error::new(ErrorKind::FormatError, e))?;
+                let digest_type = dnssec::DigestKind(digest_type);
+
+                let digest = tmp.next()
+                                    .ok_or(Error::from(ErrorKind::FormatError))?;
+                let digest = decode_hex(digest)?;
+                let digest = Digest::new(digest);
+
+                Ok(Record::DS(DS { name, class, ttl, key_tag, algorithm, digest_type, digest, }))
+            },
+            Kind::DNSKEY => {
+                // "256 3 8 AwEAAbPwrxwtOMENWvblQbUFwBllR7ZtXsu9rg="
+                let mut tmp = rdata.split(' ');
+                let flags = tmp.next()
+                                .ok_or(Error::from(ErrorKind::FormatError))?
+                                .parse::<u16>()
+                                .map_err(|e| Error::new(ErrorKind::FormatError, e))?;
+                let flags = dnssec::DNSKEYFlags::new_unchecked(flags);
+
+                let protocol = tmp.next()
+                                .ok_or(Error::from(ErrorKind::FormatError))?
+                                .parse::<u8>()
+                                .map_err(|e| Error::new(ErrorKind::FormatError, e))?;
+                let protocol = dnssec::DNSKEYProtocol(protocol);
+
+                let algorithm = tmp.next()
+                                    .ok_or(Error::from(ErrorKind::FormatError))?
+                                    .parse::<u8>()
+                                    .map_err(|e| Error::new(ErrorKind::FormatError, e))?;
+                let algorithm = dnssec::Algorithm(algorithm);
+
+                let public_key = tmp.next().ok_or(Error::from(ErrorKind::FormatError))?;
+                let public_key = base64::decode(public_key).map_err(|e| Error::new(ErrorKind::FormatError, e))?;
+                let public_key = Digest::new(public_key);
+
+                Ok(Record::DNSKEY(DNSKEY { name, class, ttl, flags, protocol, algorithm, public_key, }))
+            },
+            Kind::NSEC => {
+                // "ye. NS DS RRSIG NSEC"
+                let mut tmp = rdata.split(' ');
+                let mut next_domain_name = tmp.next().ok_or(Error::from(ErrorKind::FormatError))?.to_string();
+                if next_domain_name.ends_with('.') {
+                    next_domain_name.pop();
+                }
+
+                let mut type_bit_maps = Vec::new();
+                for kind in tmp {
+                    if let Ok(kind) = kind.parse::<Kind>() {
+                        type_bit_maps.push(kind);
+                    }
+                }
+                type_bit_maps.sort();
+
+                Ok(Record::NSEC(NSEC { name, class, ttl, next_domain_name, type_bit_maps, }))
+            },
+            Kind::RRSIG => {
+                // zw.          86400   IN  RRSIG   
+                // NSEC 8 1 86400 20191026050000 20191013040000 22545 . EGhf+lJQq8egDzxVATTj8CdW4p6fPZIjr2Y4bLZ1hEx
+                let mut tmp = rdata.split(' ');
+                
+                let type_covered = tmp.next()
+                                    .ok_or(Error::from(ErrorKind::FormatError))?
+                                    .parse::<Kind>()
+                                    .map_err(|e| Error::new(ErrorKind::FormatError, e))?;
+                let algorithm = tmp.next()
+                                    .ok_or(Error::from(ErrorKind::FormatError))?
+                                    .parse::<u8>()
+                                    .map_err(|e| Error::new(ErrorKind::FormatError, e))?;
+                let algorithm = dnssec::Algorithm(algorithm);
+                let labels = tmp.next()
+                                    .ok_or(Error::from(ErrorKind::FormatError))?
+                                    .parse::<u8>()
+                                    .map_err(|e| Error::new(ErrorKind::FormatError, e))?;
+                let original_ttl = tmp.next()
+                                    .ok_or(Error::from(ErrorKind::FormatError))?
+                                    .parse::<u32>()
+                                    .map_err(|e| Error::new(ErrorKind::FormatError, e))?;
+
+                // 20191026050000
+                let signature_expiration = tmp.next().ok_or(Error::from(ErrorKind::FormatError))?;
+                let signature_expiration = datetime_to_timestamp(signature_expiration)?;
+
+                // 20191013040000
+                let signature_inception = tmp.next().ok_or(Error::from(ErrorKind::FormatError))?;
+                let signature_inception = datetime_to_timestamp(signature_inception)?;
+
+                let key_tag = tmp.next()
+                                    .ok_or(Error::from(ErrorKind::FormatError))?
+                                    .parse::<u16>()
+                                    .map_err(|e| Error::new(ErrorKind::FormatError, e))?;
+                let mut signer_name = tmp.next()
+                                    .ok_or(Error::from(ErrorKind::FormatError))?
+                                    .to_string();
+                if signer_name.ends_with('.') {
+                    signer_name.pop();
+                }
+
+                let signature = tmp.next().ok_or(Error::from(ErrorKind::FormatError))?;
+                let signature = base64::decode(signature)
+                                    .map_err(|e| Error::new(ErrorKind::FormatError, e))?;
+                let signature = Digest::new(signature);
+                
+                Ok(Record::RRSIG(RRSIG {
+                    name, class, ttl, 
+                    type_covered,
+                    algorithm, 
+                    labels, 
+                    original_ttl, 
+                    signature_expiration, 
+                    signature_inception, 
+                    key_tag, 
+                    signer_name, 
+                    signature,
+                }))
+            },
+            Kind::SOA => {
+                // .            86400   IN  SOA 
+                // a.root-servers.net. nstld.verisign-grs.com. 2019101300 1800 900 604800 86400
+                let mut tmp = rdata.split(' ');
+                let mut mname = tmp.next()
+                                    .ok_or(Error::from(ErrorKind::FormatError))?
+                                    .to_string();
+                let mut rname = tmp.next()
+                                    .ok_or(Error::from(ErrorKind::FormatError))?
+                                    .to_string();
+                let serial = tmp.next()
+                                    .ok_or(Error::from(ErrorKind::FormatError))?
+                                    .parse::<u32>()
+                                    .map_err(|e| Error::new(ErrorKind::FormatError, e))?;
+                let refresh = tmp.next()
+                                    .ok_or(Error::from(ErrorKind::FormatError))?
+                                    .parse::<i32>()
+                                    .map_err(|e| Error::new(ErrorKind::FormatError, e))?;
+                let retry = tmp.next()
+                                    .ok_or(Error::from(ErrorKind::FormatError))?
+                                    .parse::<i32>()
+                                    .map_err(|e| Error::new(ErrorKind::FormatError, e))?;
+                let expire = tmp.next()
+                                    .ok_or(Error::from(ErrorKind::FormatError))?
+                                    .parse::<i32>()
+                                    .map_err(|e| Error::new(ErrorKind::FormatError, e))?;
+                let minimum = tmp.next()
+                                    .ok_or(Error::from(ErrorKind::FormatError))?
+                                    .parse::<u32>()
+                                    .map_err(|e| Error::new(ErrorKind::FormatError, e))?;
+                if mname.ends_with('.') {
+                    mname.pop();
+                }
+                if rname.ends_with('.') {
+                    rname.pop();
+                }
+
+                Ok(Record::SOA(SOA { name, class, ttl, mname, rname, serial, refresh, retry, expire, minimum, }))
+            },
+            _ => {
+                debug!("Record from str not implemented: Name={:?} Kind={} Class={} TTL={} RDATA={:?}", name, kind, class, ttl, rdata);
+                Err(Error::from(ErrorKind::NotImplemented))
+            },
+        }
+    }
+}
+
+
+#[test]
+fn test_parse_root_zone() {
+    let data = include_str!("../../data/root.zone");
+
+    for line in data.lines() {
+        assert!(line.parse::<Record>().is_ok(), line);
     }
 }
