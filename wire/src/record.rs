@@ -326,6 +326,9 @@ rr! { CNAME,
 rr! { DNAME,
     value: String
 }
+rr! { PTR,
+    value: String
+}
 rr! { TXT,
     value: String
 }
@@ -333,8 +336,7 @@ rr! { MX,
     preference: i16,
     exchange: String
 }
-rr! {
-    SOA,
+rr! { SOA,
     mname: String,
     rname: String,
     serial: u32,
@@ -343,6 +345,28 @@ rr! {
     expire: i32,
     minimum: u32
 }
+
+// https://tools.ietf.org/html/rfc2782
+rr! { SRV,
+    priority: u16,
+    weight: u16,
+    port: u16,
+    // The domain name of the target host.
+    // A Target of "." means that the service is decidedly not
+    // available at this domain.
+    target: String
+}
+
+// 3.3.2. HINFO RDATA format
+// https://tools.ietf.org/html/rfc1035#section-3.3.2
+rr! { HINFO,
+    // https://tools.ietf.org/html/rfc8482#section-4.2
+    // 在 RFC-8482 当中提到 `cpu` 字段应该被设置成 "RFC8482".
+    // `os` 字段应该被设置成 NULL.
+    cpu: String,
+    os: String
+}
+
 
 // ===== DNSSEC ======
 rr! { DNSKEY,
@@ -426,6 +450,14 @@ rr! { CAA,
     value: String
 }
 
+// 4.5.  URI RDATA Wire Format
+// https://tools.ietf.org/html/rfc7553#section-4.5
+rr!{ URI,
+    priority: u16,
+    weight: u16,
+    target: String
+}
+
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ClientSubnet {
@@ -459,39 +491,95 @@ impl OPT {
     }
 }
 
-
-
 #[derive(PartialEq, Eq, Clone)]
 pub enum Record {
+    // 3.4.1. A RDATA format
+    // https://tools.ietf.org/html/rfc1035#section-3.4.1
     A(A),
+    // 2.2 AAAA data format
+    // https://tools.ietf.org/html/rfc3596#section-2.2
     AAAA(AAAA),
+    // 3.3.11. NS RDATA format
+    // https://tools.ietf.org/html/rfc1035#section-3.3.11
     NS(NS),
+    // 3.3.1. CNAME RDATA format
+    // https://tools.ietf.org/html/rfc1035#section-3.3.1
     CNAME(CNAME),
+    // DNAME Redirection in the DNS
+    // https://tools.ietf.org/html/rfc6672
     DNAME(DNAME),
+    // 3.3.14. TXT RDATA format
+    // https://tools.ietf.org/html/rfc1035#section-3.3.14
+    // 
+    // Using the Domain Name System To Store Arbitrary String Attributes
+    // https://tools.ietf.org/html/rfc1464
     TXT(TXT),
+    // 3.3.9. MX RDATA format
+    // https://tools.ietf.org/html/rfc1035#section-3.3.9
     MX(MX),
+    // 3.3.13. SOA RDATA format
+    // https://tools.ietf.org/html/rfc1035#section-3.3.13
     SOA(SOA),
+    // 3.3.12. PTR RDATA format
+    // https://tools.ietf.org/html/rfc1035#section-3.3.12
+    PTR(PTR),
+    // https://tools.ietf.org/html/rfc2782
+    SRV(SRV),
+    // 4.2.  Answer with a Synthesized HINFO RRset
+    // https://tools.ietf.org/html/rfc8482#section-4.2
+    // 
+    // The CPU field of the HINFO RDATA SHOULD be set to "RFC8482".
+    // The OS field of the HINFO RDATA SHOULD be set to the null string to minimize the size of the response.
+    // 
+    // Note: 当客户端发起 Class=ANY 的查询时，DNS服务可以选择:
+    //       1. 返回 所有相关的 RR.
+    //       2. 返回 一个 HINFO RR.
+    //       3. 返回 相似的 RR 列表.
+    // 
+    // 3.3.2. HINFO RDATA format
+    // https://tools.ietf.org/html/rfc1035#section-3.3.2
+    HINFO(HINFO),
 
+    // https://tools.ietf.org/html/rfc4034
     DNSKEY(DNSKEY),
+    // 3.  The RRSIG Resource Record
+    // https://tools.ietf.org/html/rfc4034#section-3
     RRSIG(RRSIG),
+    // 4.  The NSEC Resource Record
+    // https://tools.ietf.org/html/rfc4034#page-12
     NSEC(NSEC),
+    // 3.  The NSEC3 Resource Record
+    // https://tools.ietf.org/html/rfc5155#section-3.2
     NSEC3(NSEC3),
+    // 4.2.  NSEC3PARAM RDATA Wire Format
+    // https://tools.ietf.org/html/rfc5155#page-13
     NSEC3PARAM(NSEC3PARAM),
+    // 5.1.  DS RDATA Wire Format
+    // https://tools.ietf.org/html/rfc4034#section-5.1
     DS(DS),
 
+    // 5.1.1.  Canonical Presentation Format
+    // https://tools.ietf.org/html/rfc6844#section-5.1.1
     CAA(CAA),
 
+    // 6.1.  OPT Record Definition
+    // https://tools.ietf.org/html/rfc6891#section-6.1
     OPT(OPT),
     // ALL(ALL),
     // AXFR,
     // IXFR
 
+    // 4.5.  URI RDATA Wire Format
+    // https://tools.ietf.org/html/rfc7553#section-4.5
+    URI(URI),
+
     // NOTE: 这些不再被使用的资源类型，支持一下也许更好？
-    // PTR
-    // SRV
     // SSHFP
     // SPF
     // 
+    // 3.3.10. NULL RDATA format (EXPERIMENTAL)
+    // https://tools.ietf.org/html/rfc1035#section-3.3.10
+    // NULL
 }
 
 impl Record {
@@ -505,6 +593,9 @@ impl Record {
             Self::TXT(inner) => inner.kind(),
             Self::MX(inner) => inner.kind(),
             Self::SOA(inner) => inner.kind(),
+            Self::PTR(inner) => inner.kind(),
+            Self::SRV(inner) => inner.kind(),
+            Self::HINFO(inner) => inner.kind(),
 
             Self::DNSKEY(inner) => inner.kind(),
             Self::RRSIG(inner) => inner.kind(),
@@ -516,6 +607,7 @@ impl Record {
             Self::CAA(inner) => inner.kind(),
 
             Self::OPT(inner) => inner.kind(),
+            Self::URI(inner) => inner.kind(),
         }
     }
 
@@ -538,6 +630,9 @@ impl std::fmt::Debug for Record {
             Self::TXT(inner) => std::fmt::Debug::fmt(inner, f),
             Self::MX(inner) => std::fmt::Debug::fmt(inner, f),
             Self::SOA(inner) => std::fmt::Debug::fmt(inner, f),
+            Self::PTR(inner) => std::fmt::Debug::fmt(inner, f),
+            Self::SRV(inner) => std::fmt::Debug::fmt(inner, f),
+            Self::HINFO(inner) => std::fmt::Debug::fmt(inner, f),
 
             Self::DNSKEY(inner) => std::fmt::Debug::fmt(inner, f),
             Self::RRSIG(inner) => std::fmt::Debug::fmt(inner, f),
@@ -549,6 +644,7 @@ impl std::fmt::Debug for Record {
             Self::CAA(inner) => std::fmt::Debug::fmt(inner, f),
 
             Self::OPT(inner) => std::fmt::Debug::fmt(inner, f),
+            Self::URI(inner) => std::fmt::Debug::fmt(inner, f),
         }
     }
 }
@@ -633,6 +729,77 @@ impl Deserialize for Record {
                 let minimum = u32::deserialize(deserializer)?;
 
                 Ok(Record::SOA(SOA { name, class, ttl, mname, rname, serial, refresh, retry, expire, minimum }))
+            },
+            Kind::PTR => {
+                let (class, ttl, rdlen) = deserialize_normal_rr(deserializer)?;
+                let value = String::deserialize(deserializer)?;
+                
+                Ok(Record::PTR(PTR { name, class, ttl, value }))
+            },
+            Kind::SRV => {
+                let (class, ttl, rdlen) = deserialize_normal_rr(deserializer)?;
+                let priority = u16::deserialize(deserializer)?;
+                let weight = u16::deserialize(deserializer)?;
+                let port = u16::deserialize(deserializer)?;
+                let target = String::deserialize(deserializer)?;
+
+                Ok(Record::SRV(SRV { name, class, ttl, priority, weight, port, target }))
+            },
+            Kind::HINFO => {
+                // https://tools.ietf.org/html/rfc1035#section-5.1
+                // 
+                // <character-string> is expressed in one or two ways: as a contiguous set
+                // of characters without interior spaces, or as a string beginning with a "
+                // and ending with a ".  Inside a " delimited string any character can
+                // occur, except for a " itself, which must be quoted using \ (back slash).
+                // 
+                // Because these files are text files several special encodings are
+                // necessary to allow arbitrary data to be loaded.  In particular:
+                // 
+                //                 of the root.
+                // 
+                // @               A free standing @ is used to denote the current origin.
+                // 
+                // \X              where X is any character other than a digit (0-9), is
+                //                 used to quote that character so that its special meaning
+                //                 does not apply.  For example, "\." can be used to place
+                //                 a dot character in a label.
+                // 
+                // \DDD            where each D is a digit is the octet corresponding to
+                //                 the decimal number described by DDD.  The resulting
+                //                 octet is assumed to be text and is not checked for
+                //                 special meaning.
+                // 
+                // ( )             Parentheses are used to group data that crosses a line
+                //                 boundary.  In effect, line terminations are not
+                //                 recognized within parentheses.
+                // 
+                // ;               Semicolon is used to start a comment; the remainder of
+                //                 the line is ignored.
+                let (class, ttl, rdlen) = deserialize_normal_rr(deserializer)?;
+                // https://tools.ietf.org/html/rfc8482#section-4.2
+                // 在 RFC-8482 当中提到 `cpu` 字段应该被设置成 "RFC8482".
+                // `os` 字段应该被设置成 NULL.
+                let buffer = deserializer.get_ref();
+                let start = deserializer.position();
+                let end = start + rdlen as usize;
+                match buffer.get(start..end) {
+                    Some(rdata) => {
+                        debug!("HINFO RDATA: {:?}", rdata);
+                        let mut cpu = (&rdata).iter().map(|b| *b as char).collect::<String>(); // "RFC8482"
+                        if let Some(last) = cpu.as_bytes().last() {
+                            if last == &b'\0' {
+                                cpu.pop();
+                            }
+                        }
+                        debug!("HINFO RDATA cpu field: {:?}", cpu);
+                        let os  = String::new();
+                        Ok(Record::HINFO(HINFO { name, class, ttl, cpu, os }))
+                    },
+                    None => {
+                        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "failed to fill whole buffer"));
+                    }
+                }
             },
             Kind::OPT => {
                 let class = Class(u16::deserialize(deserializer)?);
@@ -900,6 +1067,26 @@ impl Deserialize for Record {
                     }
                 }
             },
+            Kind::URI => {
+                let (class, ttl, rdlen) = deserialize_normal_rr(deserializer)?;
+                let priority = u16::deserialize(deserializer)?;
+                let weight = u16::deserialize(deserializer)?;
+                // The Target field contains the URI as a sequence of octets (without the
+                // enclosing double-quote characters used in the presentation format).
+                // The length of the Target field MUST be greater than zero.
+                let buffer = deserializer.get_ref();
+                let start = deserializer.position();
+                let end = start + rdlen as usize - 4;
+
+                if end - start < 1 {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "The length of the URI.Target field MUST be greater than zero."));
+                }
+
+                let target = &buffer[start..end];
+                let target = (&target).iter().map(|b| *b as char).collect::<String>();
+
+                Ok(Record::URI(URI { name, class, ttl, priority, weight, target, }))
+            },
             _ => {
                 unimplemented!()
             }
@@ -989,6 +1176,30 @@ impl Serialize for Record {
                     rr.retry.serialize(serializer)?;
                     rr.expire.serialize(serializer)?;
                     rr.minimum.serialize(serializer)?;
+                });
+            },
+            &Record::PTR(ref rr) => {
+                serialize_normal_rr!(rr, {
+                    rr.value.serialize(serializer)?;
+                });
+            },
+            &Record::SRV(ref rr) => {
+                serialize_normal_rr!(rr, {
+                    rr.priority.serialize(serializer)?;
+                    rr.weight.serialize(serializer)?;
+                    rr.port.serialize(serializer)?;
+                    rr.target.serialize(serializer)?;
+                });
+            },
+            &Record::HINFO(ref rr) => {
+                serialize_normal_rr!(rr, {
+                    if !rr.cpu.is_ascii() {
+                        return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid HINFO cpu string(must be ASCII)."));
+                    }
+                    rr.cpu.as_bytes().serialize(serializer)?;
+                    // NOTE: os 字段应该设置成 NULL 以节省开销
+                    //       https://tools.ietf.org/html/rfc8482#section-4.2
+                    b'\0'.serialize(serializer)?
                 });
             },
             &Record::OPT(ref rr) => {
@@ -1120,6 +1331,16 @@ impl Serialize for Record {
                     rr.value.as_bytes().serialize(serializer)?;
                 });
             },
+            &Record::URI(ref rr) => {
+                serialize_normal_rr!(rr, {
+                    rr.priority.serialize(serializer)?;
+                    rr.weight.serialize(serializer)?;
+                    if !rr.target.is_ascii() {
+                        return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid URI target string(must be ASCII)."));
+                    }
+                    rr.target.as_bytes().serialize(serializer)?;
+                });
+            },
             #[allow(unreachable_patterns)]
             _ => {
                 unimplemented!()
@@ -1132,6 +1353,7 @@ impl Serialize for Record {
 
 
 const DNS_DATETIME_FORMAT: &str = "%Y%m%d%H%M%S";
+
 // 1573557530 --> "20191026050000"
 pub fn timestamp_to_datetime(timestamp: u32) -> String {
     let native_dt = chrono::NaiveDateTime::from_timestamp(timestamp as i64, 0);
