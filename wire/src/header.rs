@@ -533,7 +533,7 @@ impl Deserialize for Request {
         let flags = HeaderFlags::new_unchecked(u16::deserialize(deserializer)?);
         
         let opcode = flags.opcode();
-        let rcode = flags.rcode();
+        let _rcode = flags.rcode();
         let mut repr_flags: ReprFlags = flags.into();
 
         let mut client_subnet = None;
@@ -672,7 +672,11 @@ impl Serialize for Request {
         self.id.serialize(serializer)?;
         hdr_flags.bits().serialize(serializer)?;
 
-        let qdcount = self.questions.len();
+        if self.questions.len() > std::u16::MAX as usize {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "too many questions"));
+        }
+
+        let qdcount = self.questions.len() as u16;
         let ancount = 0u16;
         let nscount = 0u16;
         let arcount = if !is_dnssec_ok && self.client_subnet.is_none() { 0u16 } else { 1 };

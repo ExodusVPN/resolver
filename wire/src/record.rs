@@ -996,6 +996,7 @@ impl Serialize for Record {
                     return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid DNS name(ROOT Name must be empty)."));
                 }
                 rr.name.serialize(serializer)?;
+                Kind::OPT.0.serialize(serializer)?;
                 rr.udp_size.serialize(serializer)?;
                 rr.rcode.serialize(serializer)?;
                 rr.version.serialize(serializer)?;
@@ -1153,7 +1154,7 @@ pub fn datetime_to_timestamp(s: &str) -> Result<u32, Error> {
     Ok(timestamp)
 }
 
-fn decode_hex(s: &str) -> Result<Vec<u8>, Error> {
+pub fn decode_hex(s: &str) -> Result<Vec<u8>, Error> {
     if s.len() % 2 != 0 {
         return Err(Error::new(ErrorKind::FormatError, "invalid hex sequence length"));
     }

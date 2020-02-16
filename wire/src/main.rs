@@ -15,9 +15,9 @@ use wire::kind::Kind;
 use wire::class::Class;
 use wire::opcode::OpCode;
 use wire::header::Request;
+use wire::header::Response;
 use wire::header::Question;
 use wire::header::ReprFlags;
-use wire::header::Response;
 use wire::header::HeaderFlags;
 use wire::ser::Serialize;
 use wire::ser::Serializer;
@@ -27,11 +27,17 @@ use wire::de::Deserializer;
 
 use std::io;
 
+pub fn handle_res(pkt: &[u8]) {
+    let mut deserializer = Deserializer::new(&pkt);
+    let res = Response::deserialize(&mut deserializer);
+    debug!("Res: {:?}", res);
+}
+
 
 pub fn handle_req(pkt: &[u8]) {
     let mut deserializer = Deserializer::new(&pkt);
-    let ret = Request::deserialize(&mut deserializer);
-    println!("{:?}", ret);
+    let req = Request::deserialize(&mut deserializer);
+    debug!("Req: {:?}", req);
 }
 
 pub async fn run_udp_server() -> Result<(), tokio::io::Error> {
@@ -91,7 +97,7 @@ pub async fn run_tcp_server() -> Result<(), tokio::io::Error> {
                     let data = &buf[..amt];
 
                     info!("[TCP] received {:?} bytes from client {:?}", data.len(), peer_addr);
-                    debug!("{:?}", data);
+                    debug!("req pkt : {:?}", data);
                     handle_req(data);
 
                     Ok(())
@@ -110,15 +116,9 @@ async fn run_server() -> Result<(), tokio::io::Error> {
     ).map(|(_ret1, _ret2)| ())
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    std::env::set_var("RUST_LOG", "debug");
-
-    env_logger::init();
-
-    println!("Record Size: {:?}", std::mem::size_of::<wire::record::Record>() );
-
+async fn run_client() -> Result<(), Box<dyn std::error::Error>> {
     let req = Request {
-        id: 0,
+        id: 100,
         flags: ReprFlags::default(),
         opcode: OpCode::QUERY,
         client_subnet: None,
@@ -133,7 +133,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("{:?}", req);
 
+    let mut buf = vec![0u8; 1024*4];
+    let mut serializer = Serializer::new(&mut buf);
+    req.serialize(&mut serializer)?;
+    
+    let pos = serializer.position();
+    let buf = serializer.get_ref();
+    let pkt = &buf[..pos];
+    let len = pkt.len() as u16;
+
+    use std::io::Write;
+    use std::io::Read;
+    use crate::tokio::io::AsyncWriteExt;
+    use crate::tokio::io::AsyncReadExt;
+
+    // println!("{:?}", pkt);
+    handle_req(&pkt);
+
+
+    let mut stream = tokio::net::TcpStream::connect("8.8.8.8:53").await?;
+    stream.write_all( &len.to_be_bytes() ).await?;
+    stream.write_all( &pkt ).await?;
+
+    let mut buf = vec![0u8; 1024*4];
+    stream.read_exact(&mut buf[..2]).await?;
+    let amt = u16::from_be_bytes([buf[0], buf[1]]) as usize;
+    
+    info!("response pkt size: {}", amt);
+
+    stream.read_exact(&mut buf[..amt]).await?;
+    let pkt = &buf[..amt];
+
+    // println!("{:?}", pkt);
+    handle_res(&pkt);
+    
+    Ok(())
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    std::env::set_var("RUST_LOG", "debug");
+
+    env_logger::init();
+
+    println!("Record Size: {:?}", std::mem::size_of::<wire::record::Record>() );
+
+    let data = include_str!("../../data/root.zone");
+    for line in data.lines() {
+        // println!("{:?}", line.parse::<wire::record::Record>());
+    }
+
     let mut rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(run_client())?;
     rt.block_on(run_server())?;
 
     Ok(())
