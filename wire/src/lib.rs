@@ -15,14 +15,14 @@ pub const MAXIMUM_NAMES_SIZE: usize = 255;
 pub const MAXIMUM_LABEL_SIZE: usize = 63;
 
 
-pub mod fmt;
-pub mod error;
+mod fmt;
+mod error;
 
-pub mod kind;
-pub mod class;
-pub mod opcode;
-pub mod rcode;
-pub mod header;
+mod kind;
+mod class;
+mod opcode;
+mod rcode;
+mod header;
 
 pub mod edns;
 pub mod dnssec;
@@ -36,7 +36,7 @@ pub use self::kind::Kind;
 pub use self::class::Class;
 pub use self::opcode::OpCode;
 pub use self::rcode::ResponseCode;
-
+pub use self::header::{Header, Request, Response, Question, ReprFlags, HeaderFlags, };
 
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
