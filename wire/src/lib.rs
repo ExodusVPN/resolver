@@ -15,7 +15,6 @@ pub const MAXIMUM_NAMES_SIZE: usize = 255;
 pub const MAXIMUM_LABEL_SIZE: usize = 63;
 
 
-mod fmt;
 mod error;
 
 mod kind;
@@ -38,9 +37,10 @@ pub use self::opcode::OpCode;
 pub use self::rcode::ResponseCode;
 pub use self::header::{Header, Request, Response, Question, ReprFlags, HeaderFlags, };
 
+use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
-use std::net::IpAddr;
+
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum RootServer {

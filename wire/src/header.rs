@@ -613,7 +613,7 @@ impl Deserialize for Response {
             let question = Question::deserialize(deserializer)?;
             questions.push(question);
         }
-        
+
         let mut answers = Vec::new();
         for _ in 0..ancount {
             let rr = Record::deserialize(deserializer)?;

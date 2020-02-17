@@ -317,9 +317,11 @@ fn read_name_inner(deserializer: &mut Deserializer, offset: usize, output: &mut 
             0b11 => {
                 // Compressed label the lower 6 bits and the 8 bits from next octet form a pointer to the compression target.
                 // Standard    [RFC1035]
-                let index = u16::from_be_bytes([ label_len << 2 >> 2, packet[position+1] ]) as usize;
-                
+                let lo = label_len << 2 >> 2;
+                let hi = packet[position+1];
+                let index = u16::from_be_bytes([lo, hi,]) as usize;
                 if index >= packet.len() {
+                    debug!("invalid label pointer: {:?}", index);
                     return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "failed to fill whole buffer"));
                 }
 

@@ -12,7 +12,7 @@ env_logger = "0.7"
 
 # Wire
 bitflags   = "1.2"
-base64     = "0.10"
+base64     = "0.11"
 punycode   = "0.4"
 chrono     = "0.4"
 tokio      = "0.2"
@@ -21,5 +21,4 @@ tokio      = "0.2"
 default  = [
     "tokio/full",
 ]
-
 nightly  = [ ]

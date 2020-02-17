@@ -17,7 +17,7 @@ use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 
 
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Hash, Clone)]
 pub struct Digest<T: AsRef<[u8]>> {
     inner: T
 }
@@ -42,6 +42,12 @@ impl<T: AsRef<[u8]>> Digest<T> {
     pub fn len(&self) -> usize {
         self.as_bytes().len()
     }
+
+    #[inline]
+    pub fn base64(&self) -> String {
+        let digest = self.as_ref();
+        base64::encode(digest)
+    }
 }
 
 impl<T: AsRef<[u8]>> AsRef<[u8]> for Digest<T> {
@@ -54,14 +60,6 @@ impl<T: AsRef<[u8]>> AsRef<[u8]> for Digest<T> {
 impl<T: AsRef<[u8]>> std::fmt::Debug for Digest<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{:?}", self.as_ref())
-    }
-}
-
-impl<T: AsRef<[u8]>> crate::fmt::Base64 for Digest<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let digest = self.as_ref();
-        let s = base64::encode(digest);
-        f.write_str(&s)
     }
 }
 
@@ -291,7 +289,7 @@ impl<T: AsRef<[u8]>> std::fmt::UpperHex for Digest<T> {
 
 macro_rules! rr {
     ($name:ident, $($element: ident: $ty: ty),*) => {
-        #[derive(Debug, PartialEq, Eq, Clone)]
+        #[derive(Debug, PartialEq, Eq, Hash, Clone)]
         pub struct $name {
             pub name: String,
             pub class: Class,
@@ -459,20 +457,20 @@ rr!{ URI,
 }
 
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct ClientSubnet {
     pub src_prefix_len: u8,
     pub scope_prefix_len: u8,
     pub address: IpAddr,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum OptAttr {
     ECS(ClientSubnet),
 }
 
 // ======= pseudo resource records ========
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct OPT {
     pub name: String,           // MUST be 0 (root domain)
     pub udp_size: u16,          // requestor's UDP payload size
@@ -491,7 +489,7 @@ impl OPT {
     }
 }
 
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Hash, Clone)]
 pub enum Record {
     // 3.4.1. A RDATA format
     // https://tools.ietf.org/html/rfc1035#section-3.4.1
@@ -583,6 +581,33 @@ pub enum Record {
 }
 
 impl Record {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::A(inner) => &inner.name,
+            Self::AAAA(inner) => &inner.name,
+            Self::NS(inner) => &inner.name,
+            Self::CNAME(inner) => &inner.name,
+            Self::DNAME(inner) => &inner.name,
+            Self::TXT(inner) => &inner.name,
+            Self::MX(inner) => &inner.name,
+            Self::SOA(inner) => &inner.name,
+            Self::PTR(inner) => &inner.name,
+            Self::SRV(inner) => &inner.name,
+            Self::HINFO(inner) => &inner.name,
+
+            Self::DNSKEY(inner) => &inner.name,
+            Self::RRSIG(inner) => &inner.name,
+            Self::NSEC(inner) => &inner.name,
+            Self::NSEC3(inner) => &inner.name,
+            Self::NSEC3PARAM(inner) => &inner.name,
+            Self::DS(inner) => &inner.name,
+
+            Self::CAA(inner) => &inner.name,
+            Self::OPT(inner) => &inner.name,
+            Self::URI(inner) => &inner.name,
+        }
+    }
+
     pub fn kind(&self) -> Kind {
         match self {
             Self::A(inner) => inner.kind(),
@@ -608,6 +633,63 @@ impl Record {
 
             Self::OPT(inner) => inner.kind(),
             Self::URI(inner) => inner.kind(),
+        }
+    }
+    
+    pub fn class(&self) -> Class {
+        match self {
+            Self::A(inner) => inner.class,
+            Self::AAAA(inner) => inner.class,
+            Self::NS(inner) => inner.class,
+            Self::CNAME(inner) => inner.class,
+            Self::DNAME(inner) => inner.class,
+            Self::TXT(inner) => inner.class,
+            Self::MX(inner) => inner.class,
+            Self::SOA(inner) => inner.class,
+            Self::PTR(inner) => inner.class,
+            Self::SRV(inner) => inner.class,
+            Self::HINFO(inner) => inner.class,
+
+            Self::DNSKEY(inner) => inner.class,
+            Self::RRSIG(inner) => inner.class,
+            Self::NSEC(inner) => inner.class,
+            Self::NSEC3(inner) => inner.class,
+            Self::NSEC3PARAM(inner) => inner.class,
+            Self::DS(inner) => inner.class,
+
+            Self::CAA(inner) => inner.class,
+            // unreachable
+            Self::OPT(inner) => Class(inner.udp_size),
+            Self::URI(inner) => inner.class,
+        }
+    }
+
+    pub fn ttl(&self) -> u32 {
+        match self {
+            Self::A(inner) => inner.ttl,
+            Self::AAAA(inner) => inner.ttl,
+            Self::NS(inner) => inner.ttl,
+            Self::CNAME(inner) => inner.ttl,
+            Self::DNAME(inner) => inner.ttl,
+            Self::TXT(inner) => inner.ttl,
+            Self::MX(inner) => inner.ttl,
+            Self::SOA(inner) => inner.ttl,
+            Self::PTR(inner) => inner.ttl,
+            Self::SRV(inner) => inner.ttl,
+            Self::HINFO(inner) => inner.ttl,
+
+            Self::DNSKEY(inner) => inner.ttl,
+            Self::RRSIG(inner) => inner.ttl,
+            Self::NSEC(inner) => inner.ttl,
+            Self::NSEC3(inner) => inner.ttl,
+            Self::NSEC3PARAM(inner) => inner.ttl,
+            Self::DS(inner) => inner.ttl,
+
+            Self::CAA(inner) => inner.ttl,
+
+            // uncacheable
+            Self::OPT(_) => 0,
+            Self::URI(inner) => inner.ttl,
         }
     }
 
@@ -663,7 +745,7 @@ impl Deserialize for Record {
 
             Ok((class, ttl, rdlen))
         }
-
+        
         match kind {
             Kind::A => {
                 let (class, ttl, rdlen) = deserialize_normal_rr(deserializer)?;
@@ -697,12 +779,16 @@ impl Deserialize for Record {
             },
             Kind::TXT => {
                 let (class, ttl, rdlen) = deserialize_normal_rr(deserializer)?;
+                let rdata_pos = deserializer.position();
+
                 let buffer = deserializer.get_ref();
                 let start = deserializer.position();
                 let end = start + rdlen as usize;
                 match buffer.get(start..end) {
                     Some(rdata) => {
                         let value = (&rdata).iter().map(|b| *b as char).collect::<String>();
+
+                        deserializer.set_position(rdata_pos + rdlen as usize);
 
                         Ok(Record::TXT(TXT { name, class, ttl, value }))
                     },
@@ -777,6 +863,8 @@ impl Deserialize for Record {
                 // ;               Semicolon is used to start a comment; the remainder of
                 //                 the line is ignored.
                 let (class, ttl, rdlen) = deserialize_normal_rr(deserializer)?;
+                let rdata_pos = deserializer.position();
+
                 // https://tools.ietf.org/html/rfc8482#section-4.2
                 // 在 RFC-8482 当中提到 `cpu` 字段应该被设置成 "RFC8482".
                 // `os` 字段应该被设置成 NULL.
@@ -794,6 +882,9 @@ impl Deserialize for Record {
                         }
                         debug!("HINFO RDATA cpu field: {:?}", cpu);
                         let os  = String::new();
+
+                        deserializer.set_position(rdata_pos + rdlen as usize);
+
                         Ok(Record::HINFO(HINFO { name, class, ttl, cpu, os }))
                     },
                     None => {
@@ -849,6 +940,8 @@ impl Deserialize for Record {
             // ===== DNSSEC ======
             Kind::DNSKEY => {
                 let (class, ttl, rdlen) = deserialize_normal_rr(deserializer)?;
+                let rdata_pos = deserializer.position();
+
                 let flags = dnssec::DNSKEYFlags::new_unchecked(u16::deserialize(deserializer)?);
                 let protocol = dnssec::DNSKEYProtocol(u8::deserialize(deserializer)?);
                 let algorithm = dnssec::Algorithm(u8::deserialize(deserializer)?);
@@ -859,6 +952,9 @@ impl Deserialize for Record {
                 match buf.get(start..end) {
                     Some(rdata) => {
                         let public_key = Digest::new(rdata.to_vec());
+                        
+                        deserializer.set_position(rdata_pos + rdlen as usize);
+
                         Ok(Record::DNSKEY(DNSKEY { name, class, ttl, flags, protocol, algorithm, public_key }))
                     },
                     None => {
@@ -868,6 +964,8 @@ impl Deserialize for Record {
             },
             Kind::RRSIG => {
                 let (class, ttl, rdlen) = deserialize_normal_rr(deserializer)?;
+                let rdata_pos = deserializer.position();
+
                 let type_covered = Kind(u16::deserialize(deserializer)?);
                 let algorithm = dnssec::Algorithm(u8::deserialize(deserializer)?);
                 let labels = u8::deserialize(deserializer)?;
@@ -883,6 +981,9 @@ impl Deserialize for Record {
                 match buf.get(start..end) {
                     Some(rdata) => {
                         let signature = Digest::new(rdata.to_vec());
+
+                        deserializer.set_position(rdata_pos + rdlen as usize);
+
                         Ok(Record::RRSIG(RRSIG {
                             name,
                             class,
@@ -899,12 +1000,16 @@ impl Deserialize for Record {
                         }))
                     },
                     None => {
+                        dbg!(start, end);
+
                         Err(io::Error::new(io::ErrorKind::UnexpectedEof, "failed to fill whole buffer"))
                     }
                 }
             },
             Kind::NSEC => {
                 let (class, ttl, rdlen) = deserialize_normal_rr(deserializer)?;
+                let rdata_pos = deserializer.position();
+
                 let name_pos = deserializer.position();
                 let next_domain_name = String::deserialize(deserializer)?;
                 let name_amt = deserializer.position() - name_pos;
@@ -912,6 +1017,9 @@ impl Deserialize for Record {
                 match (rdlen as usize).checked_sub(name_amt) {
                     Some(len) => {
                         let type_bit_maps = crate::de::read_type_bit_maps(deserializer, len)?;
+                        let end = name_pos + rdlen as usize;
+
+                        deserializer.set_position(rdata_pos + rdlen as usize);
 
                         Ok(Record::NSEC(NSEC { name, class, ttl, next_domain_name, type_bit_maps, }))
                     },
@@ -922,8 +1030,8 @@ impl Deserialize for Record {
             },
             Kind::NSEC3 => {
                 let (class, ttl, rdlen) = deserialize_normal_rr(deserializer)?;
-
                 let rdata_pos = deserializer.position();
+
                 let hash_algorithm = dnssec::Algorithm(u8::deserialize(deserializer)?);
                 let flags = dnssec::NSEC3Flags::new_unchecked(u8::deserialize(deserializer)?);
                 let iterations = u16::deserialize(deserializer)?;
@@ -940,6 +1048,8 @@ impl Deserialize for Record {
 
                 let salt = Digest::new(salt_data.unwrap().to_vec());
 
+                deserializer.set_position(start + salt_length as usize);
+
                 let hash_length = u8::deserialize(deserializer)?;
                 let buf = deserializer.get_ref();
                 let start = deserializer.position();
@@ -949,11 +1059,14 @@ impl Deserialize for Record {
                     return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "failed to fill whole buffer"));
                 }
                 let next_hashed_owner_name = Digest::new(hash_data.unwrap().to_vec());
+                deserializer.set_position(start + hash_length as usize);
 
                 let amt = deserializer.position() - rdata_pos;
                 match (rdlen as usize).checked_sub(amt) {
                     Some(len) => {
                         let type_bit_maps = crate::de::read_type_bit_maps(deserializer, len)?;
+
+                        deserializer.set_position(rdata_pos + rdlen as usize);
 
                         Ok(Record::NSEC3(NSEC3 {
                             name,
@@ -974,6 +1087,8 @@ impl Deserialize for Record {
             },
             Kind::NSEC3PARAM => {
                 let (class, ttl, rdlen) = deserialize_normal_rr(deserializer)?;
+                let rdata_pos = deserializer.position();
+
                 let hash_algorithm = dnssec::Algorithm(u8::deserialize(deserializer)?);
                 let flags = u8::deserialize(deserializer)?;
                 let iterations = u16::deserialize(deserializer)?;
@@ -989,12 +1104,12 @@ impl Deserialize for Record {
                 }
 
                 let salt = Digest::new(salt_data.unwrap().to_vec());
+                deserializer.set_position(rdata_pos + rdlen as usize);
 
                 Ok(Record::NSEC3PARAM(NSEC3PARAM { name, class, ttl, hash_algorithm, flags, iterations, salt, }))
             },
             Kind::DS => {
                 let (class, ttl, rdlen) = deserialize_normal_rr(deserializer)?;
-
                 let rdata_pos = deserializer.position();
 
                 let key_tag = u16::deserialize(deserializer)?;
@@ -1016,6 +1131,8 @@ impl Deserialize for Record {
 
                         let digest = Digest::new(digest_data.unwrap().to_vec());
 
+                        deserializer.set_position(rdata_pos + rdlen as usize);
+
                         Ok(Record::DS(DS {
                             name,
                             class,
@@ -1033,6 +1150,8 @@ impl Deserialize for Record {
             },
             Kind::CAA => {
                 let (class, ttl, rdlen) = deserialize_normal_rr(deserializer)?;
+                let rdata_pos = deserializer.position();
+
                 let flags = u8::deserialize(deserializer)?;
                 let tag_len = u8::deserialize(deserializer)?;
 
@@ -1046,6 +1165,7 @@ impl Deserialize for Record {
                 }
 
                 let tag = tag_data.unwrap().iter().map(|b| *b as char).collect::<String>();
+                deserializer.set_position(start + tag_len as usize);
 
                 let buf = deserializer.get_ref();
                 let start = deserializer.position();
@@ -1060,6 +1180,8 @@ impl Deserialize for Record {
                         
                         let value = value_data.unwrap().iter().map(|b| *b as char).collect::<String>();
 
+                        deserializer.set_position(rdata_pos + rdlen as usize);
+
                         Ok(Record::CAA(CAA { name, class, ttl, flags, tag, value, }))
                     },
                     None => {
@@ -1069,6 +1191,8 @@ impl Deserialize for Record {
             },
             Kind::URI => {
                 let (class, ttl, rdlen) = deserialize_normal_rr(deserializer)?;
+                let rdata_pos = deserializer.position();
+
                 let priority = u16::deserialize(deserializer)?;
                 let weight = u16::deserialize(deserializer)?;
                 // The Target field contains the URI as a sequence of octets (without the
@@ -1084,6 +1208,8 @@ impl Deserialize for Record {
 
                 let target = &buffer[start..end];
                 let target = (&target).iter().map(|b| *b as char).collect::<String>();
+
+                deserializer.set_position(rdata_pos + rdlen as usize);
 
                 Ok(Record::URI(URI { name, class, ttl, priority, weight, target, }))
             },
