@@ -59,7 +59,7 @@ impl<'a> Serializer<'a> {
     }
 
     #[inline]
-    pub fn into_inner(self) -> &'a [u8] {
+    pub fn into_inner(self) -> &'a mut [u8] {
         self.cursor.into_inner()
     }
 

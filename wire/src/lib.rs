@@ -31,6 +31,7 @@ pub mod ser;
 pub mod de;
 
 pub use self::error::Error;
+pub use self::error::ErrorKind;
 pub use self::kind::Kind;
 pub use self::class::Class;
 pub use self::opcode::OpCode;

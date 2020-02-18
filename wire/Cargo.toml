@@ -19,6 +19,20 @@ tokio      = "0.2"
 
 [features]
 default  = [
-    "tokio/full",
+    "tokio/tcp",
+    "tokio/udp",
+    "tokio/time",
+    # "tokio/sync",
+    "tokio/dns",
+    # "tokio/stream",
+    # "tokio/blocking",
+    "tokio/rt-core",
+    # "tokio/rt-util",
+    # "tokio/rt-threaded",
+    # "tokio/rt-util",
+    # "tokio/io-driver",
+    # "tokio/io-std",
+    "tokio/io-util",
+    "tokio/macros",
 ]
 nightly  = [ ]

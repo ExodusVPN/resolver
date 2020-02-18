@@ -23,16 +23,16 @@ enum Repr {
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy)]
 pub enum ErrorKind {
-    /// An operation cannot proceed because a buffer is empty or full.
-    Exhausted,
-    /// An incoming packet could not be parsed because some of its fields were out of bounds of the received data.
-    Truncated,
-    /// An incoming packet could not be recognized and was dropped.
-    Unrecognized,
-    /// An incoming packet was recognized but was self-contradictory.
-    Malformed,
-    /// An operation is not permitted in the current state.
-    Illegal,
+    // /// An operation cannot proceed because a buffer is empty or full.
+    // Exhausted,
+    // /// An incoming packet could not be parsed because some of its fields were out of bounds of the received data.
+    // Truncated,
+    // /// An incoming packet could not be recognized and was dropped.
+    // Unrecognized,
+    // /// An incoming packet was recognized but was self-contradictory.
+    // Malformed,
+    // /// An operation is not permitted in the current state.
+    // Illegal,
     
     // Response Code
 

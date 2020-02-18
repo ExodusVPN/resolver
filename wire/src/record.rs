@@ -745,7 +745,7 @@ impl Deserialize for Record {
 
             Ok((class, ttl, rdlen))
         }
-        
+
         match kind {
             Kind::A => {
                 let (class, ttl, rdlen) = deserialize_normal_rr(deserializer)?;
@@ -973,11 +973,13 @@ impl Deserialize for Record {
                 let signature_expiration = u32::deserialize(deserializer)?;
                 let signature_inception = u32::deserialize(deserializer)?;
                 let key_tag = u16::deserialize(deserializer)?;
+
                 let signer_name = String::deserialize(deserializer)?;
 
                 let buf = deserializer.get_ref();
                 let start = deserializer.position();
-                let end = start + rdlen as usize;
+                let end = rdata_pos + rdlen as usize;
+                
                 match buf.get(start..end) {
                     Some(rdata) => {
                         let signature = Digest::new(rdata.to_vec());
@@ -1001,7 +1003,6 @@ impl Deserialize for Record {
                     },
                     None => {
                         dbg!(start, end);
-
                         Err(io::Error::new(io::ErrorKind::UnexpectedEof, "failed to fill whole buffer"))
                     }
                 }
