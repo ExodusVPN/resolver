@@ -9,32 +9,36 @@ edition = "2018"
 [dependencies]
 log        = "0.4"
 
-# Wire
-bitflags   = { version = "1.2",  optional = true }
-hex        = { version = "0.4",  optional = true }
-base64     = { version = "0.10", optional = true }
-punycode   = { version = "0.4",  optional = true }
-chrono     = { version = "0.4",  optional = true }
+wire = { path = "./wire" }
 
 # Resolver
-mio        = { version = "0.6",  optional = true }
+# mio        = { version = "0.6",  optional = true }
 openssl    = { version = "0.10", optional = true }
-native-tls = { version = "0.2",  optional = true }
+# native-tls = { version = "0.2",  optional = true }
+
+tokio      = "0.2"
+ttl_cache  = "0.5"
 
 [dev-dependencies]
 env_logger = { version = "0.7", default-features = false, features = ["termcolor", "atty", "humantime"] }
 
 [features]
 default  = [
-    "wire",
-    "resolver",
+    "tokio/tcp",
+    "tokio/udp",
+    "tokio/time",
 ]
 nightly  = [ ]
 vendored = [ "openssl/vendored" ]
 
-wire     = [ "bitflags", "punycode", "base64", "hex", "chrono" ]
-resolver = [ "wire", "dnssec-validator", "mio", "proto-tcp", "proto-udp", "proto-tls" ]
+
 proto-tcp = [ ]
 proto-udp = [ ]
-proto-tls = [ "native-tls" ]
+# proto-tls = [ "native-tls" ]
+# proto-https = [ "openssl" ]
+
 dnssec-validator = [ "openssl" ]
+
+# [[example]]
+# name = 
+# required-features = ["postgres", "tools"]
