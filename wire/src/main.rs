@@ -266,14 +266,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::env::set_var("RUST_LOG", "debug");
 
     env_logger::init();
-
-    
-
     
     let mut args = env::args();
     args.next();
+    
+    // usage: cargo run --release -- "www.qq.com"
     let name = args.next().expect("./lookup www.qq.com");
-
+    
     let mut rt = tokio::runtime::Runtime::new()?;
     rt.block_on(lookup(&name))?;
     rt.block_on(run_server())?;
