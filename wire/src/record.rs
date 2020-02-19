@@ -289,7 +289,7 @@ impl<T: AsRef<[u8]>> std::fmt::UpperHex for Digest<T> {
 
 macro_rules! rr {
     ($name:ident, $($element: ident: $ty: ty),*) => {
-        #[derive(Debug, PartialEq, Eq, Hash, Clone)]
+        #[derive(Debug, Eq, Hash, Clone)]
         pub struct $name {
             pub name: String,
             pub class: Class,
@@ -305,6 +305,22 @@ macro_rules! rr {
                 Self::KIND
             }
         }
+
+        impl PartialEq for $name {
+            fn eq(&self, other: &Self) -> bool {
+                if self.name.as_str() != other.name.as_str() {
+                    return false;
+                }
+
+                if self.class != other.class {
+                    return false;
+                }
+
+                $(self.$element == other.$element) && *
+
+            }
+        }
+
     };
 }
 
@@ -979,7 +995,7 @@ impl Deserialize for Record {
                 let buf = deserializer.get_ref();
                 let start = deserializer.position();
                 let end = rdata_pos + rdlen as usize;
-                
+
                 match buf.get(start..end) {
                     Some(rdata) => {
                         let signature = Digest::new(rdata.to_vec());

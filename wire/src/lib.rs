@@ -125,3 +125,48 @@ impl RootServer {
         }
     }
 }
+
+
+// DOD INTERNET HOST TABLE SPECIFICATION
+// https://tools.ietf.org/html/rfc952
+#[cfg(unix)]
+pub const DEFAULT_HOSTS_FILE_PATH: &str = "/etc/hosts";
+#[cfg(windows)]
+pub const DEFAULT_HOSTS_FILE_PATH: &str = "C:\\Windows\\System32\\Drivers\\etc\\hosts";
+
+pub fn load_hosts<P: AsRef<std::path::Path>>(filepath: P) -> Result<Vec<(String, IpAddr)>, std::io::Error> {
+    let hosts_file = std::fs::read_to_string(filepath)?;
+    let mut hosts = Vec::new();
+
+    for line in hosts_file.lines() {
+        let mut val = line.trim();
+        if val.starts_with("#") {
+            continue;
+        }
+
+        if val.contains('#') {
+            val = val.split('#').next().unwrap();
+        }
+
+        let tmp = val.split(' ').collect::<Vec<&str>>();
+        if tmp.len() < 2 {
+            debug!("invalid host line: {:?}", val);
+            continue
+        }
+
+        let addr_str = tmp[0];
+        match addr_str.parse::<IpAddr>() {
+            Ok(addr) => {
+                for hostname in &tmp[1..] {
+                    let name = hostname.trim().to_string();
+                    hosts.push((name, addr));
+                }
+            },
+            Err(_) => {
+                debug!("invalid IP address syntax: {}", addr_str);
+            }
+        }
+    }
+
+    Ok(hosts)
+}
