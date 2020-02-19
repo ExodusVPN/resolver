@@ -1,6 +1,5 @@
 #[macro_use]
 extern crate log;
-extern crate ttl_cache;
 extern crate wire;
 
 pub mod cache;
