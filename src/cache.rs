@@ -11,95 +11,52 @@ use std::collections::hash_map::HashMap;
 
 const DEFAULT_DURATION: Duration = Duration::from_secs(24*60*60); // 24H
 
-
 #[derive(Debug, Clone)]
-pub struct Entry {
-    pub instant: Instant,
-    pub item: Record,
+pub struct Ttl<T> {
+    pub ctime: Instant,
+    pub ttl: Duration,
+    pub item: T,
 }
 
-#[derive(Debug, Clone)]
-pub struct RecordSet {
-    key: u64,
-    last_instant: Instant,
-    inner: Vec<Entry>,
-}
+impl<T> Ttl<T> {
+    pub fn new(item: T, ttl: Duration) -> Self {
+        let ctime = Instant::now();
 
-impl RecordSet {
-    pub fn new(key: u64) -> Self {
-        Self { key, last_instant: Instant::now(), inner: Vec::new() }
+        Ttl { ctime, ttl, item }
     }
 
-    pub fn contains(&self, record: &Record) -> bool {
-        self.inner.iter().any(|entry| &entry.item == record)
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.inner.len()
-    }
-
-    pub fn add(&mut self, record: Record) {
-        if !self.contains(&record) {
-            self.inner.push(Entry { instant: Instant::now(), item: record });
-            self.last_instant = Instant::now();
-        }
-    }
-
-    pub fn remove_expired(&mut self) {
-        self.inner.sort_by_key(|entry| entry.item.ttl());
-
+    pub fn is_expired(&self) -> bool {
         let now = Instant::now();
-        let mut idx = 0usize;
-
-        loop {
-            if idx >= self.inner.len() {
-                break;
-            }
-
-            let entry = &self.inner[idx];
-            let earlier = entry.instant;
-            let duration = match now.checked_duration_since(earlier) {
-                Some(v) => v,
-                None => return (),
-            };
-            let ttl = Duration::from_secs(entry.item.ttl() as u64);
-
-            if ttl <= duration {
-                self.inner.remove(idx);
-            } else {
-                idx += 1;
+        
+        if let Some(duration) = now.checked_duration_since(self.ctime) {
+            if self.ttl <= duration {
+                return true
             }
         }
+        
+        false
     }
 }
 
-type IpCidr = (IpAddr, u8);
 
 #[derive(Debug, Clone)]
 pub struct Cache {
-    inner: HashMap<u64, RecordSet>,
+    inner: HashMap<u64, Ttl<wire::Response>>,
+    nscache: HashMap<String, Vec<Ttl<IpAddr>>>,
 }
 
 impl Cache {
     pub fn new() -> Self {
         let inner = HashMap::new();
+        let nscache = HashMap::new();
 
-        Self { inner }
+        Self { inner, nscache }
     }
 
-    pub fn hash_key(&mut self, name: &str, kind: wire::Kind, class: wire::Class, ecs_ip_cidr: Option<IpCidr>) -> u64 {
-        let mut hasher = self.inner.hasher().build_hasher();
+    pub fn nslookup<N: AsRef<str>>(&self, name: N) -> Option<Vec<IpAddr>> {
+        let name = name.as_ref();
 
-        name.hash(&mut hasher);
-        kind.hash(&mut hasher);
-        class.hash(&mut hasher);
-        ecs_ip_cidr.hash(&mut hasher);
-
-        hasher.finish()
+        todo!()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -110,52 +67,82 @@ impl Cache {
         self.inner.len()
     }
 
-    pub fn add(&mut self, record: Record, ecs_ip_cidr: Option<IpCidr>) {
-        let ttl = record.ttl();
+    fn req_key_gen(&self, req: &wire::Request, name_server_ip: IpAddr) -> u64 {
+        // NOTE: 客户端在请求的时候需要注意 CIDR 信息的范围。
+        let ecs_ip_cidr = match req.client_subnet {
+            Some(ref subnet) => Some((subnet.address, subnet.src_prefix_len)),
+            None => None,
+        };
 
-        if ttl == 0 {
+        assert!(!req.questions.is_empty());
+
+        let question = &req.questions[0];
+
+        let mut hasher = self.inner.hasher().build_hasher();
+
+        name_server_ip.hash(&mut hasher);
+        &question.name.hash(&mut hasher);
+        question.kind.hash(&mut hasher);
+        question.class.hash(&mut hasher);
+        ecs_ip_cidr.hash(&mut hasher);
+
+        hasher.finish()
+    }
+
+    pub fn insert(&mut self, req: &wire::Request, name_server_ip: IpAddr, res: &wire::Response) {
+        if req.questions.is_empty() {
             return ();
         }
 
-        let key = self.hash_key(record.name(), record.kind(), record.class(), ecs_ip_cidr);
+        let req_key = self.req_key_gen(req, name_server_ip);
 
-        if !self.inner.contains_key(&key) {
-            let mut record_set = RecordSet::new(key);
-            record_set.add(record);
+        if !self.inner.contains_key(&req_key) {
+            // Update NS CACHE
+            // for records in &[ &res.answers, &res.authorities, &res.additionals ] {
+            //     for rr in records.iter() {
+            //         match rr {
+            //             wire::record::Record::A(v) => {
+            //                 let addr = IpAddr::from(v.value);
+            //                 self.nscache.insert(v.name.clone(), Ttl::new(addr, DEFAULT_DURATION));
+            //             },
+            //             wire::record::Record::AAAA(v) => {
+            //                 let addr = IpAddr::from(v.value);
+            //                 self.nscache.insert(v.name.clone(), Ttl::new(addr, DEFAULT_DURATION));
+            //             },
+            //             _ => { },
+            //         }
+            //     }
+            // }
 
-            self.inner.insert(key, record_set);
+            self.inner.insert(req_key, Ttl::new(res.clone(), DEFAULT_DURATION));
         } else {
-            let record_set = self.inner.get_mut(&key).unwrap();
-            record_set.add(record);
+            // Update TTL.
+            let res = self.inner.get_mut(&req_key).unwrap();
+            res.ctime = Instant::now();
         }
     }
 
-    pub fn get(&self, key_hash: u64) -> Option<&RecordSet> {
-        self.inner.get(&key_hash)
-    }
-    
-    pub fn remove_expired(&mut self) {
-        let now = Instant::now();
+    pub fn get(&self, req: &wire::Request, name_server_ip: IpAddr) -> Option<&wire::Response> {
+        if req.questions.is_empty() {
+            return None;
+        }
 
-        let mut expired_keys = Vec::new();
-        for (_domain_name, records) in self.inner.iter_mut() {
-            records.remove_expired();
+        let req_key = self.req_key_gen(req, name_server_ip);
 
-            if records.is_empty() {
-                match now.checked_duration_since(records.last_instant) {
-                    Some(duration) => {
-                        if duration >= DEFAULT_DURATION {
-                            expired_keys.push(records.key);
-                        }
-                    },
-                    None => { },
+        match self.inner.get(&req_key) {
+            Some(item) => {
+                if item.is_expired() {
+                    None
+                } else {
+                    Some(&item.item)
                 }
-            }
+            },
+            None => None,
         }
+    }
 
-        for k in expired_keys.iter() {
-            self.inner.remove(k);
-        }
+    pub fn remove_expired(&mut self) {
+        todo!()
     }
 }
 

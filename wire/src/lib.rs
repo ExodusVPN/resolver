@@ -42,6 +42,76 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 
+use self::ser::Serialize;
+use self::ser::Serializer;
+use self::de::Deserialize;
+use self::de::Deserializer;
+
+
+pub fn serialize_req(req: &Request, buf: &mut [u8]) -> Result<usize, Error> {
+    let mut serializer = Serializer::new(buf);
+    req.serialize(&mut serializer)?;
+    
+    Ok(serializer.position())
+}
+
+pub fn deserialize_req(buf: &[u8]) -> Result<Request, Error> {
+    let mut deserializer = Deserializer::new(&buf);
+    let req = Request::deserialize(&mut deserializer)?;
+    
+    Ok(req)
+}
+
+pub fn serialize_res(res: &Response, buf: &mut [u8]) -> Result<usize, Error> {
+    let mut serializer = Serializer::new(buf);
+    res.serialize(&mut serializer)?;
+    
+    Ok(serializer.position())
+}
+
+pub fn deserialize_res(buf: &[u8]) -> Result<Response, Error> {
+    let mut deserializer = Deserializer::new(&buf);
+    let res = Response::deserialize(&mut deserializer)?;
+    
+    Ok(res)
+}
+
+
+bitflags! {
+    pub struct Protocols: u8 {
+        /// DNS Transport over TCP
+        const TCP      = 0b_0000_0001;
+        /// DNS Transport over UDP
+        const UDP      = 0b_0000_0010;
+        /// DNS Transport over TLS (DoT)
+        const TLS      = 0b_0000_0100;
+        /// DNS Transport over DTLS
+        const DTLS     = 0b_0000_1000;
+        /// DNS Transport over HTTPS (DoH)
+        const HTTPS    = 0b_0001_0000;
+        /// TCP-DNSCrypt
+        const TCP_DNSCRYPT = 0b_0010_0000;
+        /// UDP-DNSCrypt
+        const UDP_DNSCRYPT = 0b_0100_0000;
+    }
+}
+
+impl Protocols {
+    pub fn new_unchecked(bits: u8) -> Self {
+        unsafe {
+            Self::from_bits_unchecked(bits)
+        }
+    }
+}
+
+impl Default for Protocols {
+    fn default() -> Self {
+        // NOTE: 虽然协议上，TCP 和 UDP 是必须要要实现的两个传输协议。
+        //       但是实际上，有些权威服务并不支持 TCP 协议的 DNS 查询。
+        //       比如腾讯的 DNS-POD 服务就不支持 TCP 协议。
+        Protocols::UDP | Protocols::TCP
+    }
+}
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum RootServer {

@@ -33,6 +33,9 @@ impl OpCode {
 
     #[inline]
     pub fn new(code: u8) -> Self {
+        if code >= 16 {
+            debug!("invalid OpCode.");
+        }
         assert!(code < 16);
         Self(code)
     }

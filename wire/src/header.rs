@@ -695,7 +695,7 @@ impl Serialize for Request {
         if arcount == 0 {
             return Ok(());
         }
-        debug_assert_eq!(arcount, 1);
+        // debug_assert_eq!(arcount, 1);
 
 
         let edns_flags = if is_dnssec_ok { EDNSFlags::DO } else { EDNSFlags::empty() };
@@ -716,6 +716,88 @@ impl Serialize for Request {
         };
         let opt_record = Record::OPT(opt);
         opt_record.serialize(serializer)?;
+
+        Ok(())
+    }
+}
+
+impl Serialize for Response {
+    fn serialize(&self, serializer: &mut Serializer) -> Result<(), io::Error> {
+        let mut hdr_flags: HeaderFlags = self.flags.into();
+        hdr_flags.set_opcode(self.opcode);
+        hdr_flags.set_rcode(self.rcode);
+        
+        let is_dnssec_ok = if self.flags.contains(ReprFlags::DO) { true } else { false };
+        self.id.serialize(serializer)?;
+        hdr_flags.bits().serialize(serializer)?;
+
+        if self.questions.len() > std::u16::MAX as usize {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "too many questions"));
+        }
+
+        if self.answers.len() > std::u16::MAX as usize {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "too many answers"));
+        }
+
+        if self.authorities.len() > std::u16::MAX as usize {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "too many authorities"));
+        }
+
+        if self.additionals.len() + 1 > std::u16::MAX as usize {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "too many additionals"));
+        }
+
+        let qdcount = self.questions.len() as u16;
+        let ancount = self.answers.len() as u16;
+        let nscount = self.authorities.len() as u16;
+        let arcount = self.additionals.len() as u16 + if !is_dnssec_ok && self.client_subnet.is_none() { 0u16 } else { 1 };
+
+        qdcount.serialize(serializer)?;
+        ancount.serialize(serializer)?;
+        nscount.serialize(serializer)?;
+        arcount.serialize(serializer)?;
+
+        // ===== QUESTION ======
+        for question in self.questions.iter() {
+            question.serialize(serializer)?;
+        }
+
+        // ===== Answer ======
+        for answer in self.answers.iter() {
+            answer.serialize(serializer)?;
+        }
+
+        // ===== Authority ======
+        for authority in self.authorities.iter() {
+            authority.serialize(serializer)?;
+        }
+
+        // ===== Additional ======
+        for additional in self.additionals.iter() {
+            additional.serialize(serializer)?;
+        }
+
+        // ===== EDNS =====
+        if is_dnssec_ok || self.client_subnet.is_some() {
+            let edns_flags = if is_dnssec_ok { EDNSFlags::DO } else { EDNSFlags::empty() };
+            let ends_opt_attrs = 
+                match &self.client_subnet {
+                    Some(client_subnet) => vec![ OptAttr::ECS(client_subnet.clone()) ],
+                    None => Vec::new(),
+                };
+
+            let root_name = String::new();
+            let opt = OPT {
+                name: root_name,
+                udp_size: 512,
+                rcode: 0,
+                version: EDNS_V0,
+                flags: edns_flags,
+                attrs: ends_opt_attrs,
+            };
+            let opt_record = Record::OPT(opt);
+            opt_record.serialize(serializer)?;
+        }            
 
         Ok(())
     }

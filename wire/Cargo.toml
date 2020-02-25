@@ -8,31 +8,11 @@ edition = "2018"
 
 [dependencies]
 log        = "0.4"
-env_logger = "0.7"
-
-# Wire
 bitflags   = "1.2"
 base64     = "0.11"
 punycode   = "0.4"
 chrono     = "0.4"
-tokio      = "0.2"
 
 [features]
-default  = [
-    "tokio/tcp",
-    "tokio/udp",
-    "tokio/time",
-    # "tokio/sync",
-    "tokio/dns",
-    # "tokio/stream",
-    # "tokio/blocking",
-    "tokio/rt-core",
-    # "tokio/rt-util",
-    # "tokio/rt-threaded",
-    # "tokio/rt-util",
-    # "tokio/io-driver",
-    # "tokio/io-std",
-    "tokio/io-util",
-    "tokio/macros",
-]
+default  = [ ]
 nightly  = [ ]

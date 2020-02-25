@@ -97,6 +97,9 @@ impl ResponseCode {
 
     #[inline]
     pub fn new(code: u16) -> Self {
+        if code >= 4095 {
+            debug!("invalid ResponseCode.");
+        }
         assert!(code < 4095); // 2**12 - 1
         Self(code)
     }
