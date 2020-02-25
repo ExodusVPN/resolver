@@ -336,6 +336,10 @@ impl Resolver {
         }
     }
 
+    async fn lookup_ns_name(&mut self, req: &Request, ns_hop_count: &mut usize) -> Result<Option<IpAddr>, wire::Response> {
+        todo!()
+    }
+
     /// Recursive Query
     pub async fn rquery(&mut self, req: &Request, name_server: Option<&NameServer>, buf: &mut [u8]) -> Result<Response, wire::Error> {
         if req.questions.is_empty() {
@@ -344,53 +348,22 @@ impl Resolver {
         }
 
         let mut ns_hop_count = 0usize;
-        // let mut cname_hop_count = 0usize;
+        let mut cname_hop_count = 0usize;
 
         let mut res = self.nsquery(req, name_server, buf, &mut ns_hop_count).await?;
         let mut cnames = Vec::new();
         'LOOP1: loop {
             if res.answers.is_empty() {
-                let ns_names = res.authorities.iter().rev().filter_map(|rr| {
-                    match rr {
-                        Record::NS(ref ns) => Some(ns.value.as_str()),
-                        _ => None,
-                    }
-                }).collect::<Vec<&str>>();
-
-                if ns_names.is_empty() {
-                    return Ok(res);
-                }
-
-                // NOTE: Lookup NS Name.
-                for ns_name in ns_names {
-                    warn!("NS({:?}) IP Addr not found in additionals section.", &ns_name);
-
-                    let mut req = req.clone();
-                    let question = &mut req.questions[0];
-                    question.name = ns_name.to_string();
-
-                    match self.nsquery(&req, name_server, buf, &mut ns_hop_count).await {
-                        Ok(res2) => {
-                            res = res2;
-                            continue 'LOOP1;
-                        },
-                        Err(e) => {
-                            error!("{:?}", e);
-                        },
-                    }
-                }
+                return Ok(res);
             }
-
+            
             if cnames.len() > 16 {
                 return Err(wire::Error::new(wire::ErrorKind::ServerFailure, "Too many CNAME."));
             }
 
-            let mut has_cname = false;
-            'LOOP2: for rr in res.answers.iter().rev() {
+            'LOOP4: for rr in res.answers.iter().rev() {
                 match rr {
                     Record::CNAME(ref cname) => {
-                        has_cname = true;
-
                         let mut req = req.clone();
                         let question = &mut req.questions[0];
                         question.name = cname.value.clone();
@@ -401,15 +374,14 @@ impl Resolver {
                         //       这里暂时不支持失败！
                         res = self.nsquery(&req, name_server, buf, &mut ns_hop_count).await?;
                         cnames.push(cname_rr_clone);
-                        break 'LOOP2;
+                        cname_hop_count += 1;
+                        continue 'LOOP1;
                     },
                     _ => { }
                 }
             }
 
-            if !has_cname {
-                break;
-            }
+            break;
         }
 
         cnames.reverse();
@@ -564,7 +536,84 @@ impl Resolver {
     }
 }
 
+async fn rquery(resolver: &mut Resolver, req: &Request, buf: &mut [u8]) -> Result<Response, wire::Error> {
+    let mut res = resolver.rquery(req, None, buf).await?;
 
+    'LOOP1: loop {
+        if res.answers.is_empty() {
+            // Try lookup NS name.
+            let ns_names = res.authorities.iter().rev().filter_map(|rr| {
+                match rr {
+                    Record::NS(ref ns) => Some(ns.value.as_str()),
+                    _ => None,
+                }
+            }).collect::<Vec<&str>>();
+            
+            if ns_names.is_empty() {
+                return Ok(res);
+            }
+
+            for ns_name in ns_names {
+                warn!("NS({:?}) IP Addr not found in additionals section.", &ns_name);
+                if resolver.name_server.is_ipv4() {
+                    match resolver.lookup_host_v4(ns_name, buf).await {
+                        Ok(addrs) => {
+                            for addr in addrs {
+                                let ns_addr = SocketAddr::from((addr, 53u16));
+                                let name_server = NameServer::new(Some(ns_name.to_string()), ns_addr, Protocols::default())
+                                    .map_err(|e| wire::Error::new(wire::ErrorKind::ServerFailure, e))?;
+
+                                match resolver.rquery(req, Some(&name_server), buf).await {
+                                    Ok(res2) => {
+                                        res = res2;
+                                        continue 'LOOP1;
+                                    },
+                                    Err(e) => {
+                                        error!("{:?}", e);
+                                    }
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            error!("{:?}", e);
+                        }
+                    }
+                } else if resolver.name_server.is_ipv6() {
+                    match resolver.lookup_host_v6(ns_name, buf).await {
+                        Ok(addrs) => {
+                            for addr in addrs {
+                                let ns_addr = SocketAddr::from((addr, 53u16));
+                                let name_server = NameServer::new(Some(ns_name.to_string()), ns_addr, Protocols::default())
+                                    .map_err(|e| wire::Error::new(wire::ErrorKind::ServerFailure, e))?;
+
+                                match resolver.rquery(req, Some(&name_server), buf).await {
+                                    Ok(res2) => {
+                                        res = res2;
+                                        continue 'LOOP1;
+                                    },
+                                    Err(e) => {
+                                        error!("{:?}", e);
+                                    }
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            error!("{:?}", e);
+                        }
+                    }
+                } else {
+                    unreachable!()
+                }
+                
+                return Ok(res);
+            }
+
+            return Ok(res);
+        } else {
+            return Ok(res);
+        }
+    }
+}
 
 pub async fn run_udp_server<A: ToSocketAddrs>(addr: A) -> Result<(), tokio::io::Error> {
     let mut buf = [0u8; MAX_BUFF_SIZE];
@@ -573,6 +622,7 @@ pub async fn run_udp_server<A: ToSocketAddrs>(addr: A) -> Result<(), tokio::io::
     debug!("DNS service running at udp://{} ...", listener.local_addr()?);
 
     let mut resolver = Resolver::new()?;
+
     loop {
         match listener.recv_from(&mut buf).await {
             Ok((0, _)) => continue,
@@ -583,14 +633,18 @@ pub async fn run_udp_server<A: ToSocketAddrs>(addr: A) -> Result<(), tokio::io::
 
                 match deserialize_req(pkt) {
                     Ok(req) => {
-                        match resolver.rquery(&req, None, &mut buf).await {
+
+                        match rquery(&mut resolver, &req, &mut buf).await {
                             Ok(mut res) => {
                                 debug!("{:?}", &res);
+
                                 if res.answers.len() > 0 {
                                     info!("Answers Section:");
                                     for rr in res.answers.iter() {
                                         info!("{:?}", rr);
                                     }
+                                } else {
+
                                 }
 
                                 res.questions = req.questions.clone();
@@ -607,6 +661,7 @@ pub async fn run_udp_server<A: ToSocketAddrs>(addr: A) -> Result<(), tokio::io::
                                 error!("{:?}", e);
                             },
                         }
+                        
                         debug!("QUERY DONE.\n\n");
                     },
                     Err(e) => {
