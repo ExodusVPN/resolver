@@ -2,6 +2,7 @@
 
 #[macro_use]
 extern crate log;
+extern crate rand;
 pub extern crate wire;
 
 pub mod cache;
@@ -10,16 +11,26 @@ pub mod cache;
 // pub mod udp;
 // pub mod tls;
 
+use tokio::net::UdpSocket;
+use tokio::net::TcpListener;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
+use tokio::net::ToSocketAddrs;
+
+
 use wire::Kind;
 use wire::Class;
 use wire::Request;
 use wire::Response;
+use wire::ResponseCode;
 use wire::Protocols;
 use wire::record::Record;
 use wire::serialize_req;
 use wire::serialize_res;
 use wire::deserialize_req;
 use wire::deserialize_res;
+
+use self::cache::Cache;
 
 
 use std::io;
@@ -30,12 +41,13 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV4;
 use std::net::SocketAddrV6;
+use std::time::Instant;
+use std::time::Duration;
+use std::sync::Arc;
+use std::sync::RwLock;
+use std::pin::Pin;
+use std::future::Future;
 
-use tokio::net::UdpSocket;
-use tokio::net::TcpListener;
-use tokio::io::AsyncReadExt;
-use tokio::io::AsyncWriteExt;
-use tokio::net::ToSocketAddrs;
 
 const MAX_BUFF_SIZE: usize = 1 << 16 + 2; // 64 Kb
 const MAX_NS_HOP: usize    = 16;
@@ -156,12 +168,14 @@ impl NameServer {
         self.protocols.contains(Protocols::HTTPS)
     }
 
-    pub async fn query(&self, req: &Request, buf: &mut [u8]) -> Result<Response, wire::Error> {
+    pub async fn query(&self, req: &Request) -> Result<Response, wire::Error> {
+        let mut buf = [0u8; MAX_BUFF_SIZE];
+
         if !self.is_tcp() && !self.is_udp() {
             return Err(wire::Error::new(wire::ErrorKind::ServerFailure, "DNS Protocol not supported."))
         }
 
-        if req.questions.len() == 0 {
+        if req.questions.is_empty() {
             return Err(wire::Error::new(wire::ErrorKind::FormatError, "DNS Query must have questions."));
         }
 
@@ -219,165 +233,227 @@ impl NameServer {
 }
 
 
-#[derive(Debug, Clone)]
-pub struct Resolver {
-    cache: cache::Cache,
-    name_server: NameServer,
+pub async fn is_support_ipv4() -> bool {
+    // example.com
+    // 93.184.216.34
+    // 2606:2800:220:1:248:1893:25c8:1946
+    let stream = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio::net::TcpStream::connect("93.184.216.34:80")
+    )
+    .await;
+    match stream {
+        Ok(Ok(_)) => true,
+        Ok(Err(e)) => {
+            // macOS ERROR_CODE:  65,  MSG: No route to host
+            // Linux ERROR_CODE: 101,  MSG: Network is unreachable
+            false
+        },
+        // Timeout
+        Err(_) => true,
+    }
 }
 
-fn root_server_l() -> SocketAddr {
-    // ROOT SERVER L
-    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(192, 41, 162, 30), 53))
+pub async fn is_support_ipv6() -> bool {
+    // example.com
+    // 93.184.216.34
+    // 2606:2800:220:1:248:1893:25c8:1946
+    let stream = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio::net::TcpStream::connect("2606:2800:220:1:248:1893:25c8:1946:80")
+    )
+    .await;
+    match stream {
+        Ok(Ok(_)) => true,
+        Ok(Err(e)) => {
+            // macOS ERROR_CODE:  65,  MSG: No route to host
+            // Linux ERROR_CODE: 101,  MSG: Network is unreachable
+            false
+        },
+        // Timeout
+        Err(_) => true,
+    }
+}
+
+pub async fn root_name_servers() -> Vec<NameServer> {
+    let mut servers = Vec::new();
+
+    for (name, ip_addr) in ROOT_V4_SERVERS.iter().chain(ROOT_V6_SERVERS.iter()) {
+        let now = Instant::now();
+        let socket_addr = SocketAddr::new(*ip_addr, 53);
+        let stream = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            tokio::net::TcpStream::connect(socket_addr)
+        )
+        .await;
+        if let Ok(Ok(stream)) = stream {
+            let duration = now.elapsed();
+            let domain_name = Some(name.to_string());
+            let name_server = NameServer::new(domain_name, socket_addr, Protocols::default()).unwrap();
+            servers.push((duration, name_server));
+        }
+    }
+
+    servers.sort_by_key(|item| item.0);
+    servers.reverse();
+
+    servers.into_iter()
+        .map(|item| item.1).collect::<Vec<NameServer>>()
+}
+
+
+#[derive(Debug, Clone)]
+pub struct Resolver {
+    inner: Arc<ResolverInner>,
+}
+
+#[derive(Debug, Clone)]
+struct ResolverInner {
+    config: ResolvOptions,
+    cache: Cache,
+    name_servers: Vec<NameServer>,
 }
 
 impl Resolver {
-    pub fn new() -> Result<Self, io::Error> {
-        let ns = NameServer::new(Some(String::from("l.root-servers.net")), root_server_l(), Protocols::default())?;
-        Ok(Self::with_name_server(ns))
-    }
-
-    pub fn with_name_server(name_server: NameServer) -> Self {
-        Self { cache: cache::Cache::new(), name_server, }
-    }
-
-    pub async fn lookup_host_v4(&mut self, name: &str, buf: &mut [u8]) -> Result<Vec<Ipv4Addr>, wire::Error> {
-        let res = self.lookup(name, wire::Kind::A, wire::Class::IN, buf).await?;
-        
-        let addrs = res.answers.iter().filter_map(|rr| {
-            match rr {
-                Record::A(inner) => Some(inner.value),
-                _ => None,
-            }
-        }).collect::<Vec<Ipv4Addr>>();
-
-        if addrs.is_empty() {
-            return Err(wire::Error::new(wire::ErrorKind::ServerFailure, "could not resolve to any addresses"));
-        }
-
-        Ok(addrs)
-    }
-
-    pub async fn lookup_host_v6(&mut self, name: &str, buf: &mut [u8]) -> Result<Vec<Ipv6Addr>, wire::Error> {
-        let res = self.lookup(name, wire::Kind::AAAA, wire::Class::IN, buf).await?;
-
-        let addrs = res.answers.iter().filter_map(|rr| {
-            match rr {
-                Record::AAAA(inner) => Some(inner.value),
-                _ => None,
-            }
-        }).collect::<Vec<Ipv6Addr>>();
-
-        if addrs.is_empty() {
-            return Err(wire::Error::new(wire::ErrorKind::ServerFailure, "could not resolve to any addresses"));
-        }
-
-        Ok(addrs)
-    }
-
-    pub async fn lookup_host(&mut self, name: &str, buf: &mut [u8]) -> Result<Vec<IpAddr>, wire::Error> {
-        let res = self.lookup(name, wire::Kind::A, wire::Class::IN, buf).await?;
-        
-        let mut addrs = res.answers.iter().filter_map(|rr| {
-            match rr {
-                Record::A(inner) => Some(IpAddr::V4(inner.value)),
-                _ => None,
-            }
-        }).collect::<Vec<IpAddr>>();
-
-        let res = self.lookup(name, wire::Kind::AAAA, wire::Class::IN, buf).await?;
-        for rr in res.answers {
-            match rr {
-                Record::AAAA(inner) => addrs.push(IpAddr::V6(inner.value)),
-                _ => { },
-            }
-        }
-
-        if addrs.is_empty() {
-            return Err(wire::Error::new(wire::ErrorKind::ServerFailure, "could not resolve to any addresses"));
-        }
-
-        Ok(addrs)
-    }
-
-    pub async fn lookup(&mut self, name: &str, kind: wire::Kind, class: wire::Class, buf: &mut [u8]) -> Result<Response, wire::Error> {
-        let req = Request {
-            id: 100,
-            flags: wire::ReprFlags::default(),
-            opcode: wire::OpCode::QUERY,
-            client_subnet: None,
-            questions: vec![
-                wire::Question {
-                    name: String::from(name),
-                    kind: kind,
-                    class: class,
-                }
-            ],
-        };
-
-        self.rquery(&req, None, buf).await
-    }
-
-    pub async fn query(&mut self, req: &Request, name_server: Option<&NameServer>, buf: &mut [u8]) -> Result<Response, wire::Error> {
-        let name_server = name_server.unwrap_or(&self.name_server);
-        let name_server_ip = name_server.ip();
-
-        // NOTE: 也许使用 DomainName 作为缓存的键？
-        match self.cache.get(req, name_server_ip) {
-            Some(res) => {
-                Ok(res.clone())
-            },
-            None => {
-                let res = name_server.query(req, buf).await?;
-                // Update DNS Cache
-                self.cache.insert(req, name_server_ip, &res);
-
-                Ok(res)
-            }
-        }
-    }
-
-    async fn lookup_ns_name(&mut self, req: &Request, ns_hop_count: &mut usize) -> Result<Option<IpAddr>, wire::Response> {
+    pub fn new() -> Self {
         todo!()
     }
 
-    /// Recursive Query
-    pub async fn rquery(&mut self, req: &Request, name_server: Option<&NameServer>, buf: &mut [u8]) -> Result<Response, wire::Error> {
+    pub fn query(&self, req: Arc<Request>) -> Query {
+        todo!()
+    }
+
+    pub fn resolv(&self, req: &Request) -> Result<(), ()> {
+        todo!()
+    }
+}
+
+pub async fn query(req: &Request, cache: &mut Cache, name_server: Option<&NameServer>) -> Result<Response, wire::Error> {
+    // rquery(req, cache, name_server).await
+    todo!()
+}
+
+pub fn iquery(query: Query) -> Pin<Box<dyn Future<Output = Result<Response, wire::Error> >>> {
+    Box::pin(async move {
+        let name_servers = &query.name_servers;
+        if name_servers.is_empty() {
+            return Err(wire::Error::new(wire::ErrorKind::ServerFailure, "could not find next name server."));
+        }
+
+        let idx = name_servers.len() - 1;
+        let name_server = &name_servers[idx];
+
+        let name_server_ip = name_server.ip();
+        let req = &query.request;
+
+        if query.state.read().unwrap().attempts == 0 {
+            return Err(wire::Error::new(wire::ErrorKind::ServerFailure, "recursion limit."));
+        }
+        
+        if let Some(ref cache) = query.cache {
+            if let Some(res) = cache.get(&req, name_server_ip) {
+                let mut state = query.state.write().unwrap();
+                state.attempts -= 1;
+
+                return Ok(res);
+            }
+        }
+
+        let res = name_server.query(&req).await?;
+
+        let mut state = query.state.write().unwrap();
+        state.attempts -= 1;
+
+        let mut cacheable = false;
+
+        if let Some(mut cache) = query.cache {
+            if res.rcode == wire::ResponseCode::OK {
+                // Update DNS Cache
+                if res.answers.is_empty() {
+                    let mut has_ns_rr = false;
+                    let mut has_soa_rr = false;
+                    for rr in res.authorities.iter() {
+                        match rr {
+                            Record::NS(_) => {
+                                has_ns_rr = true;
+                            },
+                            Record::SOA(_) => {
+                                has_soa_rr = true;
+                            },
+                            _ => { },
+                        }
+                    }
+
+                    if has_ns_rr && !has_soa_rr {
+                        cacheable = true;
+                    }
+                } else {
+                    cacheable = true;
+                }
+            }
+            
+            if cacheable {
+                cache.insert(&req, name_server_ip, &res);
+            }
+        }
+
+        Ok(res)
+    })
+}
+
+
+#[derive(Debug, Clone)]
+pub struct ResolvOptions {
+    /// Timeout to wait for a response.
+    pub timeout: Duration,
+    /// Number of retries before giving up.
+    pub attempts: usize,
+    pub use_ipv4: bool,
+    pub use_ipv6: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct Query {
+    state: Arc<RwLock<ResolvOptions>>,
+    cache: Option<Cache>,
+    request: Arc<Request>,
+    name_servers: Arc<Vec<NameServer>>,
+}
+
+pub fn rquery(query: Query) -> Pin<Box<dyn Future<Output = Result<Response, wire::Error> >>> {
+    Box::pin(async move {
+        let req = &query.request;
+
         if req.questions.is_empty() {
             trace!("DNS Query must have questions.");
             return Err(wire::Error::from(wire::ErrorKind::FormatError));
         }
 
-        let mut ns_hop_count = 0usize;
-        let mut cname_hop_count = 0usize;
-
-        let mut res = self.nsquery(req, name_server, buf, &mut ns_hop_count).await?;
+        let mut res = rquery2(query.clone()).await?;
         let mut cnames = Vec::new();
+        
         'LOOP1: loop {
-            if res.answers.is_empty() {
-                return Ok(res);
-            }
-            
-            if cnames.len() > 16 {
-                return Err(wire::Error::new(wire::ErrorKind::ServerFailure, "Too many CNAME."));
-            }
+            if !res.answers.is_empty() {
+                for rr in res.answers.iter().rev() {
+                    match rr {
+                        Record::CNAME(ref cname) => {
+                            let mut req: Request = (*query.request).clone();
 
-            'LOOP4: for rr in res.answers.iter().rev() {
-                match rr {
-                    Record::CNAME(ref cname) => {
-                        let mut req = req.clone();
-                        let question = &mut req.questions[0];
-                        question.name = cname.value.clone();
+                            let question = &mut req.questions[0];
+                            question.name = cname.value.clone();
 
-                        let cname_rr_clone = rr.clone();
+                            let cname_rr_clone = rr.clone();
 
-                        // NOTE: CNAME 是否允许失败？
-                        //       这里暂时不支持失败！
-                        res = self.nsquery(&req, name_server, buf, &mut ns_hop_count).await?;
-                        cnames.push(cname_rr_clone);
-                        cname_hop_count += 1;
-                        continue 'LOOP1;
-                    },
-                    _ => { }
+                            // NOTE: CNAME 跳转查询不允许失败！
+                            let mut query = query.clone();
+                            query.request = Arc::new(req);
+
+                            res = rquery2(query).await?;
+                            cnames.push(cname_rr_clone);
+                            continue 'LOOP1;
+                        },
+                        _ => { },
+                    }
                 }
             }
 
@@ -391,237 +467,205 @@ impl Resolver {
         }
 
         Ok(res)
-    }
+    })
+}
 
-    async fn nsquery(&mut self, req: &Request, name_server: Option<&NameServer>, buf: &mut [u8], ns_hop_count: &mut usize) -> Result<Response, wire::Error> {
-        let mut res = self.query(req, name_server, buf).await?;
-        *ns_hop_count += 1;
+pub fn rquery2(query: Query) -> Pin<Box<dyn Future<Output = Result<Response, wire::Error> >>> {
+    Box::pin(async move {
+        let mut res = iquery(query.clone()).await?;
 
         'LOOP1: loop {
+            if res.rcode != ResponseCode::OK {
+                return Ok(res);
+            }
+
             if !res.answers.is_empty() {
                 return Ok(res);
             }
 
-            if res.authorities.is_empty() {
-                warn!("Authority Section is empty.");
+            let name_servers = get_name_servers(&res);
+            if name_servers.is_none() {
                 return Ok(res);
             }
 
-            if *ns_hop_count > MAX_NS_HOP {
-                return Err(wire::Error::new(wire::ErrorKind::ServerFailure, "Too many NS Hop."));
-            }
+            let mut name_servers = name_servers.unwrap();
+            let mut ns_names = Vec::new();
 
-            let mut name_servers: Vec<(&str, NameServer)> = Vec::new();
-            let mut name_servers2: Vec<&str> = Vec::new();
+            let state = query.state.read().unwrap();
+            let use_ipv4 = state.use_ipv4;
+            let use_ipv6 = state.use_ipv6;
+            drop(state);
 
-            for rr in res.authorities.iter().rev() {
-                match rr {
-                    Record::NS(ref ns) => {
-                        let mut has_ns_addr = false;
-                        // for records in &[ &res.answers, &res.authorities, &res.additionals ] {
-                        for records in &[ &res.additionals ] {
-                            for rr2 in records.iter() {
-                                match rr2 {
-                                    Record::A(rdata) => {
-                                        if rdata.name.as_str() != ns.value.as_str() {
-                                            continue;
-                                        }
-                                        if !self.name_server.is_ipv4() {
-                                            continue;
-                                        }
+            'LOOP2: for (ns_name, ns_name_servers) in name_servers.iter_mut() {
+                if ns_name_servers.is_empty() {
+                    warn!("NSLOOKUP: {:?}", ns_name);
+                    ns_names.push(ns_name.to_string());
 
-                                        let ns_addr = SocketAddr::from((rdata.value, 53u16));
-                                        let name_server = NameServer::new(Some(ns.value.clone()), ns_addr, Protocols::default())
-                                            .map_err(|e| wire::Error::new(wire::ErrorKind::ServerFailure, e))?;
+                    let kind = if use_ipv6 { wire::Kind::AAAA } else { wire::Kind::A };
+                    let req = Request {
+                        id: rand::random(),
+                        flags: wire::ReprFlags::default(),
+                        opcode: wire::OpCode::QUERY,
+                        client_subnet: None,
+                        questions: vec![
+                            wire::Question {
+                                name: ns_name.clone(),
+                                kind: kind,
+                                class: wire::Class::IN,
+                            }
+                        ],
+                    };
 
-                                        has_ns_addr = true;
-                                        name_servers.push((&ns.value, name_server));
+                    let mut query = query.clone();
+                    query.request = Arc::new(req);
+
+                    match rquery(query).await {
+                        Ok(ns_res) => {
+                            for rr in ns_res.answers.iter() {
+                                match rr {
+                                    Record::A(ref a) => {
+                                        let ns_addr = SocketAddr::from((a.value, 53u16));
+                                        let name_server = NameServer::new(Some(ns_name.to_string()), ns_addr, Protocols::default())
+                                            // .map_err(|e| wire::Error::new(wire::ErrorKind::ServerFailure, e))?;
+                                            .unwrap();
+                                        debug!("NS ADDR: {:?}", name_server);
+                                        ns_name_servers.push(name_server);
                                     },
-                                    Record::AAAA(rdata) => {
-                                        if rdata.name.as_str() != ns.value.as_str() {
-                                            continue;
-                                        }
-                                        if !self.name_server.is_ipv6() {
-                                            continue;
-                                        }
-
-                                        let ns_addr = SocketAddr::from((rdata.value, 53u16));
-                                        let name_server = NameServer::new(Some(ns.value.clone()), ns_addr, Protocols::default())
-                                            .map_err(|e| wire::Error::new(wire::ErrorKind::ServerFailure, e))?;
-
-                                        has_ns_addr = true;
-                                        name_servers.push((&ns.value, name_server));
+                                    Record::AAAA(ref aaaa) => {
+                                        let ns_addr = SocketAddr::from((aaaa.value, 53u16));
+                                        let name_server = NameServer::new(Some(ns_name.to_string()), ns_addr, Protocols::default())
+                                            // .map_err(|e| wire::Error::new(wire::ErrorKind::ServerFailure, e))?;
+                                            .unwrap();
+                                        debug!("NS ADDR: {:?}", name_server);
+                                        ns_name_servers.push(name_server);
                                     },
                                     _ => { },
                                 }
                             }
-                        }
-
-                        if !has_ns_addr {
-                            // NOTE: 尝试从 ROOT_SERVERS 里面寻找
-                            let root_servers = if self.name_server.is_ipv4() { &ROOT_V4_SERVERS } else { &ROOT_V6_SERVERS };
-
-                            for  (root_name, root_addr) in root_servers.iter() {
-                                if root_name != &ns.value.as_str() {
-                                    continue;
-                                }
-
-                                let ns_addr = SocketAddr::new(*root_addr, 53u16);
-                                let name_server = NameServer::new(Some(ns.value.clone()), ns_addr, Protocols::default())
-                                    .map_err(|e| wire::Error::new(wire::ErrorKind::ServerFailure, e))?;
-
-                                has_ns_addr = true;
-                                name_servers.push((&ns.value, name_server));
-                            }
-                        }
-
-                        if !has_ns_addr {
-                            // TODO: 尝试从系统里面的 HOSTS 文件当中查找 (/etc/hosts)
-
-                        }
-
-                        if !has_ns_addr {
-                            // NOTE: 无法找到该 NS 对应的 IP 地址。
-                            name_servers2.push(&ns.value);
-                        }
-                    },
-                    Record::CNAME(ref cname) => {
-                        // WARN: 畸形的数据包。
-                        warn!("Ignore CNAME Record in Authority Section.");
-                    },
-                    _ => { },
+                        },
+                        Err(e) => {
+                            error!("{:?}", e);
+                        },
+                    }
                 }
-            }
 
-            if name_servers.is_empty() && name_servers2.is_empty() {
-                // NOTE: 无法进行下一步的 NS 地址查询。
-                warn!("Answers NotFound && NS Record NotFound.");
-                return Ok(res);
-            }
+                'LOOP3: for ns_name_server in ns_name_servers {
+                    if ns_name_server.is_ipv4() {
+                        if !use_ipv4 {
+                            continue;
+                        }
+                    }
+                    if ns_name_server.is_ipv6() {
+                        if !use_ipv6 {
+                            continue;
+                        }
+                    }
 
-            let mut res2 = None;
+                    let mut query = query.clone();
+                    query.name_servers = Arc::new(vec![ns_name_server.clone()]);
 
-            for (ns, name_server) in name_servers.iter() {
-                debug!("Switch name server to: {:?}", name_server);
-
-                match self.query(&req, Some(&name_server), buf).await {
-                    Ok(res) => {
-                        res2 = Some(res);
-                        *ns_hop_count += 1;
-                        break;
-                    },
-                    Err(e) => {
-                        error!("{:?}", e);
+                    match iquery(query).await {
+                        Ok(res_) => {
+                            res = res_;
+                            continue 'LOOP1;
+                        },
+                        Err(e) => {
+                            error!("{:?}", e);
+                        }
                     }
                 }
             }
 
-            if name_servers.is_empty() && res2.is_none() {
-                return Ok(res);
-            }
-
-            match res2 {
-                Some(res2) => {
-                    res = res2;
-                },
-                None => {
-                    return Err(wire::Error::new(wire::ErrorKind::ServerFailure, "NS DomainName cannot be resolved."));
-                }
-            }
+            return Ok(res);
         }
-    }
-
-    pub async fn resolv(&mut self, req: &Request, buf: &mut [u8]) -> Result<Response, wire::Error> {
-        todo!()
-    }
+    })
 }
 
-async fn rquery(resolver: &mut Resolver, req: &Request, buf: &mut [u8]) -> Result<Response, wire::Error> {
-    let mut res = resolver.rquery(req, None, buf).await?;
+fn get_name_servers(res: &Response) -> Option<Vec<(String, Vec<NameServer>)>> {
+    if !res.answers.is_empty() {
+        return None;
+    }
 
-    'LOOP1: loop {
-        if res.answers.is_empty() {
-            // Try lookup NS name.
-            let ns_names = res.authorities.iter().rev().filter_map(|rr| {
-                match rr {
-                    Record::NS(ref ns) => Some(ns.value.as_str()),
-                    _ => None,
+    if res.authorities.is_empty() {
+        warn!("Authority Section is empty.");
+        return None;
+    }
+
+    let mut name_servers1 = Vec::new();
+    let mut name_servers2 = Vec::new();
+    for rr in res.authorities.iter().rev() {
+        match rr {
+            Record::NS(ref ns) => {
+                let mut ns_name_servers = Vec::new();
+
+                for rr in res.additionals.iter().rev() {
+                    match rr {
+                        Record::A(ref a) => {
+                            let ns_addr = SocketAddr::from((a.value, 53u16));
+                            let name_server = NameServer::new(Some(ns.value.clone()), ns_addr, Protocols::default())
+                                // .map_err(|e| wire::Error::new(wire::ErrorKind::ServerFailure, e))?;
+                                .unwrap();
+                            ns_name_servers.push(name_server);
+                        },
+                        Record::AAAA(ref aaaa) => {
+                            let ns_addr = SocketAddr::from((aaaa.value, 53u16));
+                            let name_server = NameServer::new(Some(ns.value.clone()), ns_addr, Protocols::default())
+                                // .map_err(|e| wire::Error::new(wire::ErrorKind::ServerFailure, e))?;
+                                .unwrap();
+                            ns_name_servers.push(name_server);
+                        },
+                        _ => { },
+                    }
                 }
-            }).collect::<Vec<&str>>();
-            
-            if ns_names.is_empty() {
-                return Ok(res);
-            }
 
-            for ns_name in ns_names {
-                warn!("NS({:?}) IP Addr not found in additionals section.", &ns_name);
-                if resolver.name_server.is_ipv4() {
-                    match resolver.lookup_host_v4(ns_name, buf).await {
-                        Ok(addrs) => {
-                            for addr in addrs {
-                                let ns_addr = SocketAddr::from((addr, 53u16));
-                                let name_server = NameServer::new(Some(ns_name.to_string()), ns_addr, Protocols::default())
-                                    .map_err(|e| wire::Error::new(wire::ErrorKind::ServerFailure, e))?;
-
-                                match resolver.rquery(req, Some(&name_server), buf).await {
-                                    Ok(res2) => {
-                                        res = res2;
-                                        continue 'LOOP1;
-                                    },
-                                    Err(e) => {
-                                        error!("{:?}", e);
-                                    }
-                                }
+                if ns_name_servers.is_empty() {
+                    for root_servers in [ &ROOT_V4_SERVERS, &ROOT_V6_SERVERS ].iter() {
+                        for  (root_name, root_addr) in root_servers.iter() {
+                            if root_name != &ns.value.as_str() {
+                                continue;
                             }
-                        },
-                        Err(e) => {
-                            error!("{:?}", e);
+
+                            let ns_addr = SocketAddr::new(*root_addr, 53u16);
+                            let name_server = NameServer::new(Some(ns.value.clone()), ns_addr, Protocols::default())
+                                // .map_err(|e| wire::Error::new(wire::ErrorKind::ServerFailure, e))?;
+                                .unwrap();
+                            ns_name_servers.push(name_server);
                         }
                     }
-                } else if resolver.name_server.is_ipv6() {
-                    match resolver.lookup_host_v6(ns_name, buf).await {
-                        Ok(addrs) => {
-                            for addr in addrs {
-                                let ns_addr = SocketAddr::from((addr, 53u16));
-                                let name_server = NameServer::new(Some(ns_name.to_string()), ns_addr, Protocols::default())
-                                    .map_err(|e| wire::Error::new(wire::ErrorKind::ServerFailure, e))?;
+                }
 
-                                match resolver.rquery(req, Some(&name_server), buf).await {
-                                    Ok(res2) => {
-                                        res = res2;
-                                        continue 'LOOP1;
-                                    },
-                                    Err(e) => {
-                                        error!("{:?}", e);
-                                    }
-                                }
-                            }
-                        },
-                        Err(e) => {
-                            error!("{:?}", e);
-                        }
-                    }
+                if !ns_name_servers.is_empty() {
+                    name_servers1.push((ns.value.clone(), ns_name_servers));
                 } else {
-                    unreachable!()
+                    name_servers2.push((ns.value.clone(), ns_name_servers));
                 }
-                
-                return Ok(res);
-            }
-
-            return Ok(res);
-        } else {
-            return Ok(res);
+            },
+            _ => { },
         }
     }
+
+    name_servers1.extend(name_servers2);
+    let name_servers = name_servers1;
+
+    if name_servers.is_empty() {
+        warn!("Authority Section has no NS records.");
+        return None;
+    } else {
+        return Some(name_servers);
+    }
 }
+
 
 pub async fn run_udp_server<A: ToSocketAddrs>(addr: A) -> Result<(), tokio::io::Error> {
     let mut buf = [0u8; MAX_BUFF_SIZE];
     let mut listener = UdpSocket::bind(addr).await?;
 
-    debug!("DNS service running at udp://{} ...", listener.local_addr()?);
+    let cache = Cache::new();
+    let root_name_servers = Arc::new(root_name_servers().await);
+    let use_ipv4 = is_support_ipv4().await;
+    let use_ipv6 = is_support_ipv6().await;
 
-    let mut resolver = Resolver::new()?;
+    debug!("DNS service running at udp://{} ...", listener.local_addr()?);
 
     loop {
         match listener.recv_from(&mut buf).await {
@@ -633,8 +677,20 @@ pub async fn run_udp_server<A: ToSocketAddrs>(addr: A) -> Result<(), tokio::io::
 
                 match deserialize_req(pkt) {
                     Ok(req) => {
-
-                        match rquery(&mut resolver, &req, &mut buf).await {
+                        let req_id = req.id;
+                        let raw_questions = req.questions.clone();
+                        let query = Query {
+                            state: Arc::new(RwLock::new(ResolvOptions {
+                                timeout: Duration::from_secs(30),
+                                attempts: 32,
+                                use_ipv4: use_ipv4,
+                                use_ipv6: use_ipv6,
+                            })),
+                            cache: Some(cache.clone()),
+                            request: Arc::new(req),
+                            name_servers: root_name_servers.clone(),
+                        };
+                        match rquery(query).await {
                             Ok(mut res) => {
                                 debug!("{:?}", &res);
 
@@ -647,9 +703,9 @@ pub async fn run_udp_server<A: ToSocketAddrs>(addr: A) -> Result<(), tokio::io::
 
                                 }
 
-                                res.questions = req.questions.clone();
-                                res.id = req.id;
-                                res.authorities.clear();
+                                res.questions = raw_questions;
+                                res.id = req_id;
+                                // res.authorities.clear();
                                 // res.additionals.clear();
                                 res.flags |= wire::ReprFlags::RA;
                                 if let Ok(amt) = serialize_res(&res, &mut buf) {

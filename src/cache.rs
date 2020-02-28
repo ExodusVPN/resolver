@@ -8,6 +8,9 @@ use std::hash::Hasher;
 use std::hash::BuildHasher;
 use std::collections::hash_map::HashMap;
 
+use std::sync::Arc;
+use std::sync::RwLock;
+
 
 const DEFAULT_DURATION: Duration = Duration::from_secs(24*60*60); // 24H
 
@@ -41,11 +44,41 @@ impl<T> Ttl<T> {
 
 #[derive(Debug, Clone)]
 pub struct Cache {
+    inner: Arc<RwLock<CacheInner>>,
+}
+
+impl Cache {
+    pub fn new() -> Self {
+        let inner = Arc::new(RwLock::new(CacheInner::new()));
+        Self { inner }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.read().unwrap().is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.read().unwrap().len()
+    }
+
+    pub fn insert(&mut self, req: &wire::Request, name_server_ip: IpAddr, res: &wire::Response) {
+        let mut cache = self.inner.write().unwrap();
+        cache.insert(req, name_server_ip, res);
+    }
+
+    pub fn get(&self, req: &wire::Request, name_server_ip: IpAddr) -> Option<wire::Response> {
+        self.inner.read().unwrap().get(req, name_server_ip).map(|v| v.clone())
+    }
+}
+
+
+#[derive(Debug, Clone)]
+pub struct CacheInner {
     inner: HashMap<u64, Ttl<wire::Response>>,
     nscache: HashMap<String, Vec<Ttl<IpAddr>>>,
 }
 
-impl Cache {
+impl CacheInner {
     pub fn new() -> Self {
         let inner = HashMap::new();
         let nscache = HashMap::new();
@@ -113,7 +146,6 @@ impl Cache {
             //         }
             //     }
             // }
-
             self.inner.insert(req_key, Ttl::new(res.clone(), DEFAULT_DURATION));
         } else {
             // Update TTL.

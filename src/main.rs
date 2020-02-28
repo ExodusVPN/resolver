@@ -16,14 +16,16 @@ use std::io;
 use std::env;
 
 
+
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::env::set_var("RUST_LOG", "debug");
-
+    
     env_logger::init();
-
+    
     let mut args = env::args();
     args.next();
-
+    
     println!("Example:
 
 $ dig @127.0.0.1 video.qq.com -p 3000
@@ -32,7 +34,8 @@ $ dig @127.0.0.1 www.gov.cn -p 3000 AAAA
 
 ");
     let mut rt = tokio::runtime::Runtime::new()?;
+    
     rt.block_on(run_udp_server("127.0.0.1:3000"))?;
-
+    
     Ok(())
 }

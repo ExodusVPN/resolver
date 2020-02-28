@@ -16,6 +16,7 @@ wire = { path = "./wire" }
 openssl    = { version = "0.10", optional = true }
 # native-tls = { version = "0.2",  optional = true }
 tokio      = "0.2"
+rand       = "0.7"
 
 [dev-dependencies]
 # env_logger = { version = "0.7", default-features = false, features = ["termcolor", "atty", "humantime"] }
