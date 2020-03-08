@@ -1,15 +1,108 @@
 use native_tls;
 use tokio_tls::TlsAcceptor;
 
+use tokio::io::AsyncRead;
+use tokio::io::AsyncWrite;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 
 use std::io;
 use std::fs;
+use std::pin::Pin;
 use std::path::Path;
 use std::net::SocketAddr;
+use std::mem::MaybeUninit;
+use std::task::Poll;
+use std::task::Context;
 
-pub type TlsStream = tokio_tls::TlsStream<TcpStream>;
+
+#[derive(Debug)]
+pub struct TlsStream {
+    inner: tokio_tls::TlsStream<TcpStream>,
+}
+
+impl TlsStream {
+    pub async fn connect<S: AsRef<str>, A: tokio::net::ToSocketAddrs>(domain: S, addr: A) -> Result<Self, io::Error> {
+        let tcp_stream = TcpStream::connect(addr).await?;
+        let tls_connector = native_tls::TlsConnector::builder()
+            .min_protocol_version(Some(native_tls::Protocol::Tlsv11))
+            .use_sni(true)
+            .build()
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+        let tls_connector = tokio_tls::TlsConnector::from(tls_connector);
+
+        let tls_stream = tls_connector
+            .connect(domain.as_ref(), tcp_stream)
+            .await
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+        Ok(Self { inner: tls_stream })
+    }
+
+    pub fn local_addr(&self) -> Result<SocketAddr, io::Error> {
+        self.inner.get_ref().local_addr()
+    }
+
+    pub fn peer_addr(&self) -> Result<SocketAddr, io::Error> {
+        self.inner.get_ref().peer_addr()
+    }
+
+    pub fn ttl(&self) -> Result<u32, io::Error> {
+        self.inner.get_ref().ttl()
+    }
+
+    pub fn set_ttl(&self, ttl: u32) -> Result<(), io::Error> {
+        self.inner.get_ref().set_ttl(ttl)
+    }
+
+    pub fn into_inner(self) -> tokio_tls::TlsStream<TcpStream> {
+        self.inner
+    }
+}
+
+impl AsyncRead for TlsStream {
+    unsafe fn prepare_uninitialized_buffer(&self, buf: &mut [MaybeUninit<u8>]) -> bool {
+        self.inner.prepare_uninitialized_buffer(buf)
+    }
+
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context, buf: &mut [u8]) -> Poll<io::Result<usize>> {
+        Pin::new(&mut (self.get_mut()).inner).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for TlsStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        ctx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut (self.get_mut()).inner).poll_write(ctx, buf)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut (self.get_mut()).inner).poll_flush(ctx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut (self.get_mut()).inner).poll_shutdown(ctx)
+    }
+}
+
+impl AsRef<tokio_tls::TlsStream<TcpStream>> for TlsStream {
+    #[inline]
+    fn as_ref(&self) -> &tokio_tls::TlsStream<TcpStream> {
+        &self.inner
+    }
+}
+
+impl AsMut<tokio_tls::TlsStream<TcpStream>> for TlsStream {
+    #[inline]
+    fn as_mut(&mut self) -> &mut tokio_tls::TlsStream<TcpStream> {
+        &mut self.inner
+    }
+}
+
 
 pub struct TlsIdentity {
     inner: native_tls::Identity,
@@ -26,6 +119,15 @@ impl TlsIdentity {
         let key = fs::read(key_path.as_ref())?;
         Self::from_pkcs12(&key, pass)
     }
+
+    pub fn into_acceptor(self) -> Result<TlsAcceptor, io::Error> {
+        let tls_acceptor = native_tls::TlsAcceptor::builder(self.inner)
+            .min_protocol_version(Some(native_tls::Protocol::Tlsv11))
+            .build()
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+        Ok(tokio_tls::TlsAcceptor::from(tls_acceptor))
+    }
 }
 
 #[derive(Debug)]
@@ -36,16 +138,10 @@ pub struct TlsListener {
 
 impl TlsListener {
     pub async fn bind<A: tokio::net::ToSocketAddrs>(addr: A, identity: TlsIdentity) -> Result<Self, io::Error> {
-        let listener = TcpListener::bind(&addr).await?;
+        let listener = TcpListener::bind(addr).await?;
+        let acceptor = identity.into_acceptor()?;
 
-        let tls_acceptor = native_tls::TlsAcceptor::builder(identity.inner)
-            .min_protocol_version(Some(native_tls::Protocol::Tlsv11))
-            .build()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-
-        let tls_acceptor = tokio_tls::TlsAcceptor::from(tls_acceptor);
-
-        Ok(Self { listener, acceptor: tls_acceptor })
+        Ok(Self { listener, acceptor, })
     }
 
     pub async fn accept(&mut self) -> Result<(TlsStream, SocketAddr), io::Error> {
@@ -53,6 +149,7 @@ impl TlsListener {
             let (tcp_stream, peer_addr) = self.listener.accept().await?;
             match self.acceptor.accept(tcp_stream).await {
                 Ok(tls_stream) => {
+                    let tls_stream = TlsStream { inner: tls_stream };
                     return Ok((tls_stream, peer_addr));
                 },
                 Err(e) => {

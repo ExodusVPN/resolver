@@ -7,6 +7,9 @@ use h2;
 use bytes;
 use http;
 use tokio_tls;
+use base64;
+
+use tokio::net::TcpStream;
 
 use std::io;
 use std::net::SocketAddr;
@@ -22,14 +25,24 @@ pub type Respond = h2::server::SendResponse<bytes::Bytes>;
 
 const URI_PATH: &str = "/dns-query";
 const CONTENT_TYPE: &str = "application/dns-message";
+const DNS_QUERY_KEY: &str = "dns";
+const DNS_MSG_ID: u16 = 0; // Alwasy set 0.
 
+
+fn base64url_decode<T: AsRef<[u8]> + ?Sized>(input: &T) -> Result<Vec<u8>, base64::DecodeError> {
+    base64::decode_config(input, base64::URL_SAFE_NO_PAD)
+}
+
+fn base64url_encode<T: AsRef<[u8]> + ?Sized>(input: &T) -> String {
+    base64::encode_config(input, base64::URL_SAFE_NO_PAD)
+}
 
 #[derive(Debug)]
 pub struct HttpsListener {
     listener: TlsListener,
 }
 
-type FN<S> = fn(S, Request, Respond) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, std::io::Error> > + Send >>;
+type FN<S> = fn(S) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, std::io::Error> > + Send + Sync >>;
 
 impl HttpsListener {
     pub fn new(listener: TlsListener) -> Self {
@@ -50,15 +63,19 @@ impl HttpsListener {
             }
         }
     }
-    
-    pub async fn on_request<S: 'static + Send + Sync + Clone + ?Sized>(&mut self, state: S, f: FN<S> ) {
+
+    pub async fn on_request<S: 'static + Send + Sync + Clone>(&mut self, state: S, f: FN<S> ) {
         let (mut h2_conn, peer_addr) = self.accept().await.unwrap();
         loop {
             match h2_conn.accept().await {
                 Some(h2_channel) => {
                     match h2_channel {
                         Ok((request, respond)) => {
-                            tokio::spawn(h2_request_handle(state.clone(), request, respond));
+                            let state = state.clone();
+                            tokio::spawn(async move {
+                                h2_request_handle(state.clone(), request, respond).await;
+                                let _ = f(state).await;
+                            });
                         },
                         Err(e) => {
                             trace!("H2 accept stream Error({}): {:?}", peer_addr, e);
