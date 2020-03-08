@@ -29,6 +29,8 @@ pub struct HttpsListener {
     listener: TlsListener,
 }
 
+type FN<S> = fn(S, Request, Respond) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, std::io::Error> > + Send >>;
+
 impl HttpsListener {
     pub fn new(listener: TlsListener) -> Self {
         Self { listener }
@@ -48,10 +50,8 @@ impl HttpsListener {
             }
         }
     }
-
-    // Pin<Box<dyn Future<Output = Result<Response, wire::Error> > + Send >>
-    // f: FnMut(S, Request, ) -> ()
-    pub async fn on_request<S: 'static + Send + Sync + Clone>(&mut self, state: S,  ) {
+    
+    pub async fn on_request<S: 'static + Send + Sync + Clone + ?Sized>(&mut self, state: S, f: FN<S> ) {
         let (mut h2_conn, peer_addr) = self.accept().await.unwrap();
         loop {
             match h2_conn.accept().await {
