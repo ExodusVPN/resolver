@@ -8,18 +8,25 @@ edition = "2018"
 
 [dependencies]
 log        = "0.4"
-env_logger = "0.7"
+env_logger = { version = "0.7", default-features = false, features = ["termcolor", "atty", "humantime"] }
+rand       = "0.7"
+tokio      = "0.2"
 
-wire = { path = "./wire" }
+h2    = "0.2"
+http  = "0.2"
+bytes = "0.5"
+clap  = "2.33"
+
+wire  = { path = "./wire" }
+
+native-tls = "0.2"
+tokio-tls  = "0.3"
 
 # Resolver
-openssl    = { version = "0.10", optional = true }
-# native-tls = { version = "0.2",  optional = true }
-tokio      = "0.2"
-rand       = "0.7"
+# openssl    = { version = "0.10", optional = false }
 
 [dev-dependencies]
-# env_logger = { version = "0.7", default-features = false, features = ["termcolor", "atty", "humantime"] }
+
 
 [features]
 default  = [
@@ -28,17 +35,6 @@ default  = [
     "tokio/time",
     "tokio/full",
 ]
-nightly  = [ ]
-vendored = [ "openssl/vendored" ]
 
-
-proto-tcp = [ ]
-proto-udp = [ ]
-# proto-tls = [ "native-tls" ]
-# proto-https = [ "openssl" ]
-
-dnssec-validator = [ "openssl" ]
-
-# [[example]]
-# name = 
-# required-features = ["postgres", "tools"]
+nightly  = [ "clap/nightly", ]
+# vendored = [ "openssl/vendored" ]
