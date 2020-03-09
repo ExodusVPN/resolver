@@ -15,17 +15,26 @@ use std::mem::MaybeUninit;
 use std::task::Poll;
 use std::task::Context;
 
+pub type TlsVersion = native_tls::Protocol;
+
+const MIN_TLS_VERSION: TlsVersion = native_tls::Protocol::Tlsv12;
+
+#[derive(Debug, Clone, Copy)]
+pub struct TlsOption {
+    pub min_version: TlsVersion,
+    pub use_sni: bool,
+}
 
 #[derive(Debug)]
 pub struct TlsStream {
-    inner: tokio_tls::TlsStream<TcpStream>,
+    pub(crate) inner: tokio_tls::TlsStream<TcpStream>,
 }
 
 impl TlsStream {
     pub async fn connect<S: AsRef<str>, A: tokio::net::ToSocketAddrs>(domain: S, addr: A) -> Result<Self, io::Error> {
         let tcp_stream = TcpStream::connect(addr).await?;
         let tls_connector = native_tls::TlsConnector::builder()
-            .min_protocol_version(Some(native_tls::Protocol::Tlsv11))
+            .min_protocol_version(Some(MIN_TLS_VERSION))
             .use_sni(true)
             .build()
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
@@ -122,7 +131,7 @@ impl TlsIdentity {
 
     pub fn into_acceptor(self) -> Result<TlsAcceptor, io::Error> {
         let tls_acceptor = native_tls::TlsAcceptor::builder(self.inner)
-            .min_protocol_version(Some(native_tls::Protocol::Tlsv11))
+            .min_protocol_version(Some(MIN_TLS_VERSION))
             .build()
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
