@@ -1,3 +1,40 @@
+// FIXME: 
+//      1. 等待上游支持在客户端以及服务端设置 ALPN 信息。
+//      2. 等待上游支持 TLSv_1_3。
+// 
+// 
+
+//!
+//! TLSv1_3 的支持情况
+//! ===============================
+//! TLSv1.3 Requires OpenSSL 1.1.1 or newer.
+//! 
+//! *   ❌ tokio-tls
+//! *   ❌ native-tls
+//! *   ❌ schannel              (Windoows)
+//! *   ✅ openssl               (Linux)
+//! *   ✅ security-framework    (macOS)
+//! 
+//! ALPN 的支持情况
+//! ===============================
+//! *   ❌ tokio-tls
+//! *   ❌ native-tls
+//! *   📝 schannel              (Windoows) , PR #68 正在审核当中。
+//! *   ✅ openssl               (Linux)
+//! *   ⚠️ security-framework    (macOS)    , 有限度支持，需要手动开启 "alpn" feature, 且只支持客户端设置 ALPN。
+//! 
+//! DTLSv1_3 的支持情况
+//! =====================
+//! *   ❌ tokio-tls
+//! *   ❌ native-tls
+//! *   ❌ schannel              (Windoows)
+//! *   ❓ openssl               (Linux)    , 不确定！
+//! *   ❌ security-framework    (macOS)
+//!
+//! 
+//! Last Update: 2020/03/11
+//! 
+
 use native_tls;
 use tokio_tls::TlsAcceptor;
 
@@ -15,41 +52,6 @@ use std::mem::MaybeUninit;
 use std::task::Poll;
 use std::task::Context;
 
-
-// FIXME: 
-//      1. 等待上游支持在客户端以及服务端设置 ALPN 信息。
-//      2. 等待上游支持 TLSv_1_3。
-// 
-// 
-/// TLSv1_3 的支持情况
-/// =====================
-/// TLSv1.3 Requires OpenSSL 1.1.1 or newer.
-/// 
-/// *   ❌ tokio-tls
-/// *   ❌ native-tls
-/// *   ❌ schannel              (Windoows)
-/// *   ✅ openssl               (Linux)
-/// *   ✅ security-framework    (macOS)
-/// 
-/// ALPN 的支持情况
-/// =====================
-/// *   ❌ tokio-tls
-/// *   ❌ native-tls
-/// *   📝 schannel              (Windoows) , PR #68 正在审核当中。
-/// *   ✅ openssl               (Linux)
-/// *   ⚠️ security-framework    (macOS)    , 有限度支持，需要手动开启 "alpn" feature, 且只支持客户端设置 ALPN。
-/// 
-/// DTLSv1_3 的支持情况
-/// =====================
-/// *   ❌ tokio-tls
-/// *   ❌ native-tls
-/// *   ❌ schannel              (Windoows)
-/// *   ❓ openssl               (Linux)    , 不确定！
-/// *   ❌ security-framework    (macOS)
-///
-/// 
-/// Last Update: 2020/03/11
-/// 
 
 pub type TlsVersion = native_tls::Protocol;
 
