@@ -9,8 +9,7 @@ extern crate tokio;
 #[macro_use]
 extern crate clap;
 
-use resolver::run_udp_server;
-use resolver::run_tcp_server;
+
 use resolver::net::tls;
 use resolver::net::h2::server::H2Listener;
 use resolver::net::h2::server::H2Connection;
