@@ -34,12 +34,14 @@ impl H2ReadResponse {
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
             .into_parts();
 
-        trace!("Got Response from Peer={} StreamId={:?}:", peer_addr, stream_id);
-        println!("{:?} {}", head.version, head.status);
-        for (k, v) in head.headers.iter() {
-            println!("{}: {:?}", k, v);
+        if log_enabled!(log::Level::Trace) {
+            trace!("Got Response from Peer={} StreamId={:?}:", peer_addr, stream_id);
+            println!("{:?} {}", head.version, head.status);
+            for (k, v) in head.headers.iter() {
+                println!("{}: {:?}", k, v);
+            }
+            println!();
         }
-        println!();
 
         let mut body = Vec::new();
         let mut flow_control = recv_stream.flow_control().clone();
