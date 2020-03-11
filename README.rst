@@ -20,7 +20,7 @@ Build
     git clone https://github.com/ExodusVPN/resolver
     cargo build --release
 
-    cargo run --release
+    cargo run --bin named
 
 
 
@@ -36,8 +36,8 @@ Build
 ---------------
 *   ✅ DNS Transport over UDP
 *   ✅ DNS Transport over TCP
-*   🔜 DNS over TLS (DoT)
-*   🔜 DNS over HTTPS (DoH)
+*   ✅ DNS over TLS (DoT)
+*   ✅ DNS over HTTPS (DoH)
 *   🔜 DNSCrypt over UDP
 *   🔜 DNSCrypt over TCP
 
@@ -53,5 +53,10 @@ RFC 实现
 *   ✅ `[RFC5155] DNS Security (DNSSEC) Hashed Authenticated Denial of Existence <https://tools.ietf.org/html/rfc5155>`_
 *   ✅ `[RFC6891] Extension Mechanisms for DNS (EDNS(0)) <https://tools.ietf.org/html/rfc6891>`_
 *   ✅ `[RFC7766] DNS Transport over TCP - Implementation Requirements <https://tools.ietf.org/html/rfc7766>`_
+*   ✅ `[RFC7858] Specification for DNS over Transport Layer Security (TLS) <https://tools.ietf.org/html/rfc7858>`_
+*   🔜 `[RFC8310] Usage Profiles for DNS over TLS and DNS over DTLS <https://tools.ietf.org/html/rfc8310>`_
+*   ✅ `[RFC8484] DNS Queries over HTTPS (DoH) <https://tools.ietf.org/html/rfc8484>`_
+
+ 
 
 
