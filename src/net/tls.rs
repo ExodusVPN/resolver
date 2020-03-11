@@ -15,14 +15,51 @@ use std::mem::MaybeUninit;
 use std::task::Poll;
 use std::task::Context;
 
+
+// FIXME: 
+//      1. 等待上游支持在客户端以及服务端设置 ALPN 信息。
+//      2. 等待上游支持 TLSv_1_3。
+// 
+// 
+/// TLSv1_3 的支持情况
+/// =====================
+/// TLSv1.3 Requires OpenSSL 1.1.1 or newer.
+/// 
+/// *   ❌ tokio-tls
+/// *   ❌ native-tls
+/// *   ❌ schannel              (Windoows)
+/// *   ✅ openssl               (Linux)
+/// *   ✅ security-framework    (macOS)
+/// 
+/// ALPN 的支持情况
+/// =====================
+/// *   ❌ tokio-tls
+/// *   ❌ native-tls
+/// *   📝 schannel              (Windoows) , PR #68 正在审核当中。
+/// *   ✅ openssl               (Linux)
+/// *   ⚠️ security-framework    (macOS)    , 有限度支持，需要手动开启 "alpn" feature, 且只支持客户端设置 ALPN。
+/// 
+/// DTLSv1_3 的支持情况
+/// =====================
+/// *   ❌ tokio-tls
+/// *   ❌ native-tls
+/// *   ❌ schannel              (Windoows)
+/// *   ❓ openssl               (Linux)    , 不确定！
+/// *   ❌ security-framework    (macOS)
+///
+/// 
+///        2020/03/11
+/// 
+
 pub type TlsVersion = native_tls::Protocol;
 
 const MIN_TLS_VERSION: TlsVersion = native_tls::Protocol::Tlsv12;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct TlsOption {
     pub min_version: TlsVersion,
     pub use_sni: bool,
+    pub alpns: Vec<u8>,
 }
 
 #[derive(Debug)]
@@ -33,6 +70,8 @@ pub struct TlsStream {
 impl TlsStream {
     pub async fn connect<S: AsRef<str>, A: tokio::net::ToSocketAddrs>(domain: S, addr: A) -> Result<Self, io::Error> {
         let tcp_stream = TcpStream::connect(addr).await?;
+        // FIXME: 等待上游支持在客户端以及服务端设置 ALPN 信息。
+        warn!("FIXME: 等待上游支持在客户端以及服务端设置 ALPN 信息。");
         let tls_connector = native_tls::TlsConnector::builder()
             .min_protocol_version(Some(MIN_TLS_VERSION))
             .use_sni(true)
@@ -130,6 +169,8 @@ impl TlsIdentity {
     }
 
     pub fn into_acceptor(self) -> Result<TlsAcceptor, io::Error> {
+        // FIXME: 等待上游支持在客户端以及服务端设置 ALPN 信息。
+        warn!("FIXME: 等待上游支持在客户端以及服务端设置 ALPN 信息。");
         let tls_acceptor = native_tls::TlsAcceptor::builder(self.inner)
             .min_protocol_version(Some(MIN_TLS_VERSION))
             .build()
@@ -167,19 +208,28 @@ impl TlsListener {
             }
         }
     }
+    
+    #[inline]
+    pub fn tcp_listener(&self) -> &TcpListener {
+        &self.listener
+    }
 
+    #[inline]
     pub fn acceptor(&self) -> &TlsAcceptor {
         &self.acceptor
     }
 
+    #[inline]
     pub fn local_addr(&self) -> Result<SocketAddr, io::Error> {
         self.listener.local_addr()
     }
 
+    #[inline]
     pub fn ttl(&self) -> Result<u32, io::Error> {
         self.listener.ttl()
     }
 
+    #[inline]
     pub fn set_ttl(&self, ttl: u32) -> Result<(), io::Error> {
         self.listener.set_ttl(ttl)
     }

@@ -17,12 +17,14 @@ tokio-tls  = "0.3"
 h2    = "0.2"
 http  = "0.2"
 bytes = "0.5"
-clap  = "2.33"
 wire  = { path = "./wire" }
 base64 = "0.11"
+clap   = "2.33"
 
 # Resolver
 # openssl    = { version = "0.10", optional = false }
+# lazy_static = "1.4"
+# resolv-conf = "0.6"
 
 [dev-dependencies]
 
@@ -37,3 +39,15 @@ default  = [
 
 nightly  = [ "clap/nightly", ]
 # vendored = [ "openssl/vendored" ]
+
+[[bin]]
+name = "named"
+path = "./bin/named.rs"
+
+[[bin]]
+name = "h2client"
+path = "./bin/h2client.rs"
+
+[[bin]]
+name = "h2server"
+path = "./bin/h2server.rs"
